@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# app build output
+dist/
+release/
+desktop/
+
+# C++ host build artifacts (default + secure)
+packages/hull/host/build*/
+
+# Prebuilt host binaries are produced by CI (`npm run build:host`), not committed
+packages/hull-*/bin/
+
+# The inspector IS a shipped build artifact (served by `hull dev`); keep it tracked.
+!/packages/hull/devtools/dist/
+!/packages/hull/devtools/dist/index.html

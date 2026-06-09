@@ -1,0 +1,13 @@
+{
+  "name": "@mwguerra/hull-darwin-arm64",
+  "version": "0.1.0",
+  "description": "Prebuilt Hull host binary for macOS (Apple Silicon).",
+  "type": "module",
+  "main": "index.js",
+  "exports": { ".": "./index.js" },
+  "files": ["index.js", "bin"],
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "author": "mwguerra",
+  "license": "MIT"
+}

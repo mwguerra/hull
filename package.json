@@ -1,0 +1,23 @@
+{
+  "name": "hull-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Monorepo for @mwguerra/hull — tiny native desktop apps from your web UI.",
+  "type": "module",
+  "workspaces": [
+    "packages/hull",
+    "examples/*"
+  ],
+  "scripts": {
+    "build:host": "node scripts/build-host.mjs",
+    "build:hosts": "node scripts/build-host.mjs --all",
+    "build:windows": "node scripts/build-host.mjs --target win32-x64",
+    "build:mac": "node scripts/build-host.mjs --target darwin",
+    "build:linux": "node scripts/build-host.mjs --target linux-x64",
+    "build:host:secure": "node scripts/build-host.mjs --secure",
+    "build:linux:secure": "node scripts/build-host.mjs --target linux-x64 --secure",
+    "build:devtools": "vite build packages/hull/devtools",
+    "prepare-publish": "node scripts/prepare-publish.mjs"
+  },
+  "license": "MIT"
+}

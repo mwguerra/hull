@@ -1,0 +1,22 @@
+{
+  "name": "@mwguerra/hull-win32-x64",
+  "version": "0.1.0",
+  "description": "Prebuilt Hull host binary for Windows x64 (installed automatically by @mwguerra/hull on matching machines).",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "bin"
+  ],
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "author": "mwguerra",
+  "license": "MIT"
+}

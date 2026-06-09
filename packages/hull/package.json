@@ -1,0 +1,54 @@
+{
+  "name": "@mwguerra/hull",
+  "version": "0.1.0",
+  "description": "Tiny native desktop apps from your Vue/React UI — a prebuilt C++ web-view host you drive with npm scripts. No compiler, no Electron.",
+  "type": "module",
+  "bin": {
+    "hull": "bin/hull.js"
+  },
+  "exports": {
+    "./bridge": "./src/bridge/index.js",
+    "./vue": "./src/vue/index.js",
+    "./react": "./src/react/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "src",
+    "assets",
+    "devtools/dist",
+    "README.md",
+    "host/CMakeLists.txt",
+    "host/README.md",
+    "host/linux.Dockerfile",
+    "host/src",
+    "host/test",
+    "host/third_party"
+  ],
+  "keywords": [
+    "desktop",
+    "webview",
+    "native",
+    "vue",
+    "react",
+    "cpp",
+    "gui",
+    "electron-alternative",
+    "tauri-alternative"
+  ],
+  "author": "mwguerra",
+  "license": "MIT",
+  "dependencies": {
+    "archiver": "^7.0.0",
+    "vite-plugin-singlefile": "^2.1.0"
+  },
+  "peerDependencies": {
+    "vite": ">=5"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
+  },
+  "comment:optionalDependencies": "The per-platform host packages (@mwguerra/hull-<os>-<arch>) are injected here at publish time by the monorepo's scripts/prepare-publish.mjs (run from the repo root in CI) so npm installs only the matching binary. They are intentionally omitted from the repo manifest because npm validates workspace os/cpu and would reject non-matching platforms during local install."
+}

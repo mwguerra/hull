@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hull · Vanilla JS</title>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div class="brand">
+          <img id="logo" class="logo" alt="Hull" />
+          <div>
+            <h1>Hull · Vanilla JS</h1>
+            <div class="sub">Plain JS talking to the C++ backend — no framework.</div>
+          </div>
+        </div>
+        <span><span id="native-badge" class="badge no">browser</span>
+        <span id="secure-badge" class="badge ok" hidden>secure</span></span>
+      </div>
+
+      <!-- 1) Bridge / ping -->
+      <section class="card">
+        <h2>1 · Bridge call</h2>
+        <p class="hint">Synchronous <code>ping(text)</code> → C++ echoes a JSON result.</p>
+        <input id="ping-text" value="Hello from vanilla JS" />
+        <div class="actions"><button id="ping-send">Send to C++</button></div>
+        <pre id="ping-out" hidden></pre>
+        <p id="ping-err" class="err" hidden></p>
+      </section>
+
+      <!-- 2) Settings -->
+      <section class="card">
+        <h2>2 · Settings (encrypted at rest)</h2>
+        <p class="hint">Two-way state persisted by C++ (AES-256-GCM). C++ pushes a
+          <code>settings:changed</code> event after every write.</p>
+        <label>Theme</label>
+        <select id="theme">
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+        <div class="grid2" style="margin-top:.6rem">
+          <input id="note-key" value="note" />
+          <input id="note-val" placeholder="value" />
+        </div>
+        <div class="actions">
+          <button id="note-save">Save setting</button>
+          <button id="settings-reload" class="ghost">Reload all</button>
+        </div>
+        <p id="note-status" class="status" hidden></p>
+        <pre id="settings-all" hidden></pre>
+        <label style="margin-top:.8rem">C++ → UI events</label>
+        <ul id="event-log" class="log"><li class="muted">no events yet</li></ul>
+      </section>
+
+      <!-- 3) Credentials -->
+      <section class="card">
+        <h2>3 · Credentials (write-only)</h2>
+        <p class="hint">Stored in the OS keychain. Never returned to JS — only a boolean check.</p>
+        <div class="grid2">
+          <div><label>Service</label><input id="cred-service" value="api.example.com" /></div>
+          <div><label>Account</label><input id="cred-account" value="default" /></div>
+        </div>
+        <label>Secret / token</label>
+        <input id="cred-secret" type="password" placeholder="never returned to JS" />
+        <div class="actions">
+          <button id="cred-store">Store</button>
+          <button id="cred-check" class="ghost">Check exists</button>
+          <button id="cred-remove" class="ghost">Remove</button>
+        </div>
+        <p id="cred-status" class="status" hidden></p>
+      </section>
+
+      <!-- 4) HTTP -->
+      <section class="card">
+        <h2>4 · HTTP POST (TLS, from C++)</h2>
+        <p class="hint">Runs on a C++ worker thread (cpp-httplib + OpenSSL). Adds a
+          keychain <code>Bearer</code> token if one exists for the host.</p>
+        <label>URL</label>
+        <input id="http-url" value="https://httpbin.org/post" />
+        <label>JSON body</label>
+        <textarea id="http-body" rows="3">{ "name": "Widget", "qty": 3 }</textarea>
+        <div class="actions"><button id="http-send">POST</button></div>
+        <pre id="http-out" hidden></pre>
+      </section>
+
+      <!-- 5) Printers -->
+      <section class="card">
+        <h2>5 · Printers</h2>
+        <p class="hint">Discover (Winspool / CUPS), then print a test message — a text document that works with any printer, incl. Microsoft Print to PDF.</p>
+        <div class="actions"><button id="pr-discover" class="ghost">Discover printers</button></div>
+        <label>Printer</label>
+        <select id="pr-select"><option value="">— none —</option></select>
+        <label>Message</label>
+        <input id="pr-text" value="Hello from Hull!" />
+        <div class="actions"><button id="pr-print">Print test message</button></div>
+        <p id="pr-status" class="status" hidden></p>
+      </section>
+
+      <!-- 6) SQLite -->
+      <section class="card">
+        <h2>6 · Notes (SQLite)</h2>
+        <p class="hint">Parameterized SQLite in the C++ backend, stored in the per-user app dir.
+          <code>migrate</code> sets up the schema once; add/delete persist across restarts.</p>
+        <div class="grid2">
+          <input id="note-body" placeholder="Write a note…" />
+          <button id="note-add" style="flex:0 0 auto">Add</button>
+        </div>
+        <ul id="notes" class="log"><li class="muted">no notes yet</li></ul>
+        <p id="db-error" class="err" hidden></p>
+      </section>
+
+      <!-- 7) Files -->
+      <section class="card">
+        <h2>7 · Files (uploads)</h2>
+        <p class="hint">Stored in the per-user app dir through the secure layer; names are
+          sanitized (no path traversal). Pick a file to upload, then view or delete it.</p>
+        <input id="file-input" type="file" />
+        <ul id="files" class="log"><li class="muted">no files yet</li></ul>
+        <pre id="file-preview" hidden></pre>
+        <p id="file-error" class="err" hidden></p>
+      </section>
+
+      <!-- 8) Image upload (single) -->
+      <section class="card">
+        <h2>8 · Image upload (single)</h2>
+        <p class="hint">Upload one image — it's stored through the secure file layer and
+          shown below. Uploading another replaces (deletes) the previous one. The preview
+          survives restarts.</p>
+        <input id="image-input" type="file" accept="image/*" />
+        <div id="image-box" class="imgbox" hidden>
+          <img id="image-preview" class="preview" alt="" />
+          <div class="imgmeta">
+            <span id="image-name" class="muted"></span>
+            <button id="image-delete" class="ghost">Delete image</button>
+          </div>
+        </div>
+        <p id="image-empty" class="muted">no image uploaded yet</p>
+        <p id="image-error" class="err" hidden></p>
+      </section>
+
+      <footer>Built with @mwguerra/hull · no Electron, no bundled browser</footer>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
