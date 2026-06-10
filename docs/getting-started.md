@@ -102,8 +102,23 @@ browser dev mode + the inspector.
 | `npx hull build … --platform <key\|all> [--format zip\|tar.gz]` | also package other platforms whose host binary is installed (via `npm run`, flags need the `--` separator: `npm run build -- --platform all`) |
 | `hull start [vX.Y.Z]` | run a packaged build (defaults to `development`) |
 | `hull installer [vX.Y.Z]` | wrap the build into a native installer — `.dmg` (macOS), `.deb` (Linux), `.exe` (Windows) |
+| `hull doctor` | check this machine for everything Hull needs (host binary, web view, system libraries) with copy-pasteable fixes |
 | `hull eject` | copy the C++ host into `./desktop` for custom native code |
 | `hull help` | usage |
 
 Add `-v` / `--verbose` to any command for per-step timings (every command also prints
-its total time).
+its total time). Add `--debug` to `dev`/`start` for a verbose host log on stderr plus
+the web-view devtools — the first tool to reach for if a window opens blank.
+
+### Linux runtime packages
+
+The host renders in WebKitGTK and uses libsecret (keychain) and CUPS (printing), so
+those runtimes must be installed — `hull start`/`hull dev` check this up front and
+print the exact install command when something is missing. On Debian/Ubuntu:
+
+```bash
+sudo apt install libwebkitgtk-6.0-4 libsecret-1-0 libcups2
+```
+
+(The `.deb` produced by `hull installer` declares these as dependencies, so end users
+get them automatically — this only concerns dev machines.)

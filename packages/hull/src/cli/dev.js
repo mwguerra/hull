@@ -7,6 +7,15 @@ import { loadConfig, hostArgs, hostEnv } from "./config.js";
 import { resolveHost } from "./host.js";
 import { loadVite } from "./vite.js";
 import { createTimer } from "./timing.js";
+import { missingLibraries, missingLibsError, explainSpawnError, exitAdvice } from "./diagnose.js";
+
+// Linux: list every missing system library up front (the loader would fail on
+// just the first one). Throws with a single copy-pasteable install command.
+function preflight(binary) {
+  if (process.platform !== "linux") return;
+  const libs = missingLibraries(binary);
+  if (libs.length) throw new Error(missingLibsError(binary, libs));
+}
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const INSPECTOR_HTML = path.resolve(here, "../../devtools/dist/index.html"); // built single file
@@ -94,8 +103,10 @@ export async function dev(cwd, args, { verbose } = {}) {
     timer.step("vite dev server");
 
     const { binary } = await resolveHost({ secure: cfg.secure });
+    preflight(binary);
     const host = spawn(binary, ["--serve", String(port), "--inspect", "--app-id", cfg.appId],
                        { stdio: "inherit" });
+    host.on("error", (err) => { console.error(`hull dev: ${explainSpawnError(err, binary) ?? err.message}`); process.exit(1); });
     await waitForHealth(bridgeUrl);
     timer.step("host bridge server");
 
@@ -137,12 +148,16 @@ export async function dev(cwd, args, { verbose } = {}) {
   timer.step("dev server ready");
 
   const { binary } = await resolveHost({ secure: cfg.secure });
+  preflight(binary);
   // --inspect enables the trace; --inspect-port runs the trace server for the inspector.
+  const debug = args.includes("--debug") && !cfg.debug;
   const env = { ...process.env, ...hostEnv(cfg, { noSandbox: args.includes("--no-sandbox") }) };
   const child = spawn(
     binary,
-    ["--url", url, "--inspect", "--inspect-port", String(inspectPort), ...hostArgs(cfg)],
+    ["--url", url, "--inspect", "--inspect-port", String(inspectPort), ...hostArgs(cfg),
+     ...(debug ? ["--debug"] : [])],
     { stdio: "inherit", env });
+  child.on("error", (err) => { console.error(`hull dev: ${explainSpawnError(err, binary) ?? err.message}`); process.exit(1); });
   timer.step("native window launched");
 
   if (await waitForHealth(traceUrl)) {
@@ -152,7 +167,7 @@ export async function dev(cwd, args, { verbose } = {}) {
   timer.total("hull dev ready");
 
   const shutdown = async () => { try { await server.close(); } catch {} process.exit(0); };
-  child.on("exit", shutdown);
+  child.on("exit", (code) => { if (code) console.error(exitAdvice("dev", code)); shutdown(); });
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 }

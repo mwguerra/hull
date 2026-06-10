@@ -484,11 +484,19 @@ Framework hooks: `useNativeState(key)` from `@mwguerra/hull/vue` (returns a ref)
 | `hull build … --platform <key\|all>` | also package other platforms whose host binary is present; `--format zip\|tar.gz` |
 | `hull start [vX.Y.Z]` | run a packaged build |
 | `hull installer [vX.Y.Z]` | wrap the build into a native installer — `.dmg` (macOS), `.deb` (Linux), `.exe` (Windows) |
+| `hull doctor` | check this machine for everything Hull needs (host binary, web view, system libraries) with copy-pasteable fixes |
 | `hull eject` | copy the C++ host project into `./desktop` to add native bindings |
 
 Add `-v` / `--verbose` to any command for per-step timings (every command prints its
-total time). The version argument must match `vX.Y.Z` (optionally `-suffix`); with no
-version, output goes to a `development/` folder.
+total time). Add `--debug` to `dev`/`start` for a verbose host log on stderr plus the
+web-view devtools — the first tool to reach for if a window opens blank. The version
+argument must match `vX.Y.Z` (optionally `-suffix`); with no version, output goes to
+a `development/` folder.
+
+> **Linux dev machines** need the host's runtime libraries (WebKitGTK, libsecret,
+> CUPS): `sudo apt install libwebkitgtk-6.0-4 libsecret-1-0 libcups2`. `hull start`/
+> `hull dev` check this up front and print the exact command for your distro; the
+> `.deb` from `hull installer` declares them automatically for end users.
 
 > When passing **flags** like `--platform` through `npm run`, the `--` separator is
 > required: `npm run build -- --platform all` forwards the flag, but without `--`

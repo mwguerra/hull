@@ -21,6 +21,7 @@
 #include <string>
 #include <optional>
 #include <thread>
+#include <filesystem>
 #include <nlohmann/json.hpp>
 
 #include "dispatcher.hpp"
@@ -201,18 +202,26 @@ void install_desktop_integration(const std::string& app_id, const std::string& t
   g_set_prgname(app_id.c_str());
 }
 
-// Build a percent-encoded file:// URL from a local path. On WebKitGTK we load the
-// packaged app.html by URL (not set_html): set_html gives the document a null base
-// URL, under which <script type="module"> — what the single-file bundle uses — does
-// not execute, so the app renders blank. A real file:// origin runs the modules.
+#endif
+
+// Build a percent-encoded file:// URL from a local path. Every platform loads the
+// packaged app.html by URL, never set_html: set_html gives the document a null /
+// opaque base URL under which <script type="module"> — what the single-file bundle
+// uses — may not execute (always blocked on WebKit; varies with the Evergreen
+// runtime version on WebView2), so the app renders blank. A real file:// origin
+// always runs the modules, and lifts WebView2's ~2 MB NavigateToString limit.
 std::string file_uri(const std::string& path) {
   std::error_code ec;
   std::filesystem::path abs = std::filesystem::absolute(path, ec);
-  const std::string p = ec ? path : abs.string();
+  const std::string p = (ec ? std::filesystem::path(path) : abs).generic_string();
   static const char* hex = "0123456789ABCDEF";
-  std::string out = "file://";
+#if defined(_WIN32)
+  std::string out = "file:///"; // p is "C:/...": the third slash roots the authority
+#else
+  std::string out = "file://";  // p is "/home/...": already rooted
+#endif
   for (unsigned char c : p) {
-    if (c == '/' || c == '-' || c == '_' || c == '.' || c == '~' ||
+    if (c == '/' || c == '-' || c == '_' || c == '.' || c == '~' || c == ':' ||
         (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
       out += static_cast<char>(c);
     } else {
@@ -221,7 +230,6 @@ std::string file_uri(const std::string& path) {
   }
   return out;
 }
-#endif
 
 #if defined(__APPLE__)
 // Load the packaged app.html into the WKWebView with the API Apple sanctions for
@@ -293,14 +301,6 @@ Options parse_args(int argc, char** argv) {
     else if (a == "--inspect") { o.inspect = true; }
   }
   return o;
-}
-
-std::optional<std::string> read_file(const std::string& path) {
-  std::ifstream f(path, std::ios::binary);
-  if (!f) return std::nullopt;
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
 }
 
 const char* FALLBACK_HTML =
@@ -402,23 +402,29 @@ int main(int argc, char** argv) {
     }
 
     if (opt.url) {
+      if (opt.debug) std::cerr << "hull-host: navigate " << *opt.url << "\n";
       window.navigate(*opt.url);
     } else if (opt.app) {
-#if defined(__linux__)
-      // Load by file:// URL so module scripts run (set_html's null base blocks them
-      // on WebKitGTK). Fall back to set_html only if the file is missing.
-      if (std::filesystem::exists(*opt.app)) window.navigate(file_uri(*opt.app));
-      else window.set_html(FALLBACK_HTML);
-#elif defined(__APPLE__)
-      // WKWebView has the same null-base module problem as WebKitGTK, and its
-      // loadRequest: refuses file:// URLs — use loadFileURL via the objc runtime.
-      if (!std::filesystem::exists(*opt.app) || !load_app_file(window, *opt.app))
+      if (!std::filesystem::exists(*opt.app)) {
+        std::cerr << "hull-host: app file not found: " << *opt.app << " — showing fallback page\n";
         window.set_html(FALLBACK_HTML);
+      } else {
+#if defined(__APPLE__)
+        // WKWebView refuses plain loadRequest: for file:// URLs — load with
+        // loadFileURL:allowingReadAccessToURL: via the objc runtime.
+        if (opt.debug) std::cerr << "hull-host: loading app (loadFileURL) " << *opt.app << "\n";
+        if (!load_app_file(window, *opt.app)) {
+          std::cerr << "hull-host: loadFileURL failed for " << *opt.app << " — showing fallback page\n";
+          window.set_html(FALLBACK_HTML);
+        }
 #else
-      // WebView2 (Chromium) runs module scripts under set_html's base just fine.
-      if (auto html = read_file(*opt.app)) window.set_html(*html);
-      else window.set_html(FALLBACK_HTML);
+        // Windows + Linux: navigate to a real file:// URL (see file_uri's comment —
+        // set_html's opaque base can silently block module scripts).
+        const std::string uri = file_uri(*opt.app);
+        if (opt.debug) std::cerr << "hull-host: loading app " << uri << "\n";
+        window.navigate(uri);
 #endif
+      }
     } else {
       window.set_html(FALLBACK_HTML);
     }

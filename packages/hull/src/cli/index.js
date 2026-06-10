@@ -3,6 +3,7 @@ import { build } from "./build.js";
 import { start } from "./start.js";
 import { eject } from "./eject.js";
 import { installer } from "./installer.js";
+import { doctor } from "./doctor.js";
 
 const HELP = `
 hull — tiny native desktop apps from your web UI
@@ -13,11 +14,14 @@ Usage: hull <command> [options]
   build      Build the single-file UI and package it with the native host
   start      Run the packaged app from ./release
   installer  Wrap the build into a native installer (.dmg / .deb / .exe)
+  doctor     Check this machine for everything Hull needs (host binary, web view,
+             system libraries) and print copy-pasteable fixes
   eject      Copy the C++ host project into ./desktop for custom native code
   help       Show this help
 
 Options:
   -v, --verbose   Print per-step timings (every command also prints its total time)
+  --debug         (dev/start) verbose host log on stderr + open the web-view devtools
 
 Config is optional. Defaults come from package.json; override in .hullrc:
   { "appId": "com.you.app", "secure": false, "window": { "title": "App" } }
@@ -35,6 +39,7 @@ export async function run(argv) {
       case "build": await build(cwd, args, opts); break;
       case "start": await start(cwd, args, opts); break;
       case "installer": await installer(cwd, args, opts); break;
+      case "doctor": await doctor(cwd); break;
       case "eject": await eject(cwd, args, opts); break;
       case undefined:
       case "help":
