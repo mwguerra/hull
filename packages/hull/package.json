@@ -1,6 +1,6 @@
 {
   "name": "@mwguerra/hull",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Tiny native desktop apps from your Vue/React UI — a prebuilt C++ web-view host you drive with npm scripts. No compiler, no Electron.",
   "type": "module",
   "bin": {

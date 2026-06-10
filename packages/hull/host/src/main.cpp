@@ -50,6 +50,12 @@
 #include <glib.h>       // g_set_prgname (window app-id -> desktop icon)
 #endif
 
+#if defined(__APPLE__)
+#include <filesystem>        // absolute path for loadFileURL
+#include <objc/runtime.h>    // objc_getClass / sel_registerName
+#include <objc/message.h>    // objc_msgSend (loadFileURL:allowingReadAccessToURL:)
+#endif
+
 using json = nlohmann::json;
 
 namespace {
@@ -217,6 +223,40 @@ std::string file_uri(const std::string& path) {
 }
 #endif
 
+#if defined(__APPLE__)
+// Load the packaged app.html into the WKWebView with the API Apple sanctions for
+// local files: loadFileURL:allowingReadAccessToURL: (read access granted to the
+// file's directory). A plain navigate()/loadRequest: refuses file:// URLs, and
+// set_html gives the document a null base URL under which <script type="module">
+// — what the single-file bundle uses — never executes, so the app renders blank
+// (the same WebKit behavior the Linux build works around with file_uri).
+bool load_app_file(webview::webview& w, const std::string& path) {
+  auto wk = w.browser_controller(); // WKWebView* on Cocoa
+  if (!wk.ok() || !wk.value()) return false;
+  std::error_code ec;
+  const std::filesystem::path abs = std::filesystem::absolute(path, ec);
+  if (ec) return false;
+  const std::string p = abs.string();
+  using SendStr = id (*)(id, SEL, const char*);
+  using SendId  = id (*)(id, SEL, id);
+  using Send0   = id (*)(id, SEL);
+  using Send2   = id (*)(id, SEL, id, id);
+  id nsString = reinterpret_cast<id>(objc_getClass("NSString"));
+  id nsUrl    = reinterpret_cast<id>(objc_getClass("NSURL"));
+  id nsPath   = reinterpret_cast<SendStr>(objc_msgSend)(
+      nsString, sel_registerName("stringWithUTF8String:"), p.c_str());
+  id fileUrl  = reinterpret_cast<SendId>(objc_msgSend)(
+      nsUrl, sel_registerName("fileURLWithPath:"), nsPath);
+  if (!fileUrl) return false;
+  id dirUrl   = reinterpret_cast<Send0>(objc_msgSend)(
+      fileUrl, sel_registerName("URLByDeletingLastPathComponent"));
+  reinterpret_cast<Send2>(objc_msgSend)(
+      reinterpret_cast<id>(wk.value()),
+      sel_registerName("loadFileURL:allowingReadAccessToURL:"), fileUrl, dirUrl);
+  return true;
+}
+#endif
+
 struct Options {
   std::optional<std::string> url;
   std::optional<std::string> app;
@@ -369,7 +409,13 @@ int main(int argc, char** argv) {
       // on WebKitGTK). Fall back to set_html only if the file is missing.
       if (std::filesystem::exists(*opt.app)) window.navigate(file_uri(*opt.app));
       else window.set_html(FALLBACK_HTML);
+#elif defined(__APPLE__)
+      // WKWebView has the same null-base module problem as WebKitGTK, and its
+      // loadRequest: refuses file:// URLs — use loadFileURL via the objc runtime.
+      if (!std::filesystem::exists(*opt.app) || !load_app_file(window, *opt.app))
+        window.set_html(FALLBACK_HTML);
 #else
+      // WebView2 (Chromium) runs module scripts under set_html's base just fine.
       if (auto html = read_file(*opt.app)) window.set_html(*html);
       else window.set_html(FALLBACK_HTML);
 #endif
