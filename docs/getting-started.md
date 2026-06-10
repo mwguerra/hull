@@ -99,7 +99,7 @@ browser dev mode + the inspector.
 | `hull dev` | start Vite + open the native window (HMR) + the inspector tab |
 | `hull dev --browser` | run the UI in your **browser** (full HMR, no recompile) + inspector tab — see [devtools.md](devtools.md) |
 | `hull build [vX.Y.Z]` | bundle the UI and assemble `release/<version\|development>/<platform>/` + an archive |
-| `npx hull build … --platform <key\|all> [--format zip\|tar.gz]` | also package other platforms whose host binary is installed (use `npx`: `npm run` swallows flags) |
+| `npx hull build … --platform <key\|all> [--format zip\|tar.gz]` | also package other platforms whose host binary is installed (via `npm run`, flags need the `--` separator: `npm run build -- --platform all`) |
 | `hull start [vX.Y.Z]` | run a packaged build (defaults to `development`) |
 | `hull installer [vX.Y.Z]` | wrap the build into a native installer — `.dmg` (macOS), `.deb` (Linux), `.exe` (Windows) |
 | `hull eject` | copy the C++ host into `./desktop` for custom native code |

@@ -490,9 +490,9 @@ Add `-v` / `--verbose` to any command for per-step timings (every command prints
 total time). The version argument must match `vX.Y.Z` (optionally `-suffix`); with no
 version, output goes to a `development/` folder.
 
-> Pass **flags** like `--platform` via `npx hull …` (or the binary directly). `npm run`
-> swallows unknown flags, so `npm run build -- v1.2.3` works for the version but
-> `--platform` won't reach Hull through it.
+> When passing **flags** like `--platform` through `npm run`, the `--` separator is
+> required: `npm run build -- --platform all` forwards the flag, but without `--`
+> npm silently drops it. `npx hull …` avoids the footgun entirely.
 
 ## Configuration (`.hullrc`)
 

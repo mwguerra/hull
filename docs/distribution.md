@@ -103,9 +103,10 @@ npx hull build v1.2.3 --platform all        # every platform whose host is insta
 npx hull build v1.2.3 --platform linux-x64  # one specific target
 ```
 
-> Use `npx hull …` (or call the binary directly) when passing **flags** like
-> `--platform`. `npm run build -- v1.2.3` works for the version, but `npm run`
-> swallows unknown flags, so `--platform` won't reach Hull through it.
+> When passing **flags** like `--platform` through `npm run`, the `--` separator is
+> required: `npm run build -- --platform all` forwards the flag, but
+> `npm run build --platform all` (no `--`) silently drops it. `npx hull …` avoids
+> the footgun entirely.
 
 Because the host packages are os/cpu-gated, an app developer normally only has their
 own platform's host installed — so the realistic way to produce **all** platforms for
