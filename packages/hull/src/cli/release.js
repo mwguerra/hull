@@ -36,7 +36,13 @@ export function copyHostFiles(hostDir, destDir, binName) {
   for (const entry of fs.readdirSync(hostDir)) {
     if (DENY_NAMES.has(entry) || DENY_EXT.has(path.extname(entry))) continue;
     if (entry.startsWith("hull-host") && entry !== binName) continue; // skip other flavor
-    fs.copyFileSync(path.join(hostDir, entry), path.join(destDir, entry));
+    const dest = path.join(destDir, entry);
+    fs.copyFileSync(path.join(hostDir, entry), dest);
+    // The source may have lost its exec bit (npm tarballs packed in CI); the
+    // archives force 0o755 already — keep the loose bundle dir runnable too.
+    if (entry === binName && !binName.endsWith(".exe")) {
+      try { fs.chmodSync(dest, 0o755); } catch { /* best effort */ }
+    }
   }
 }
 

@@ -18,10 +18,21 @@ const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
 const version = process.argv[2] ?? pkg.version;
 
 delete pkg["comment:optionalDependencies"];
+pkg.version = version; // the tag drives every published version
 pkg.optionalDependencies = Object.fromEntries(
   TARGETS.map((k) => [`@mwguerra/hull-${k}`, version])
 );
 
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-console.log(`prepare-publish: pinned optionalDependencies to ${version}`);
+
+// Pin the platform packages to the same version, so a tag fully determines
+// what gets published (no stale checked-in versions).
+for (const k of TARGETS) {
+  const p = path.join(root, "packages", `hull-${k}`, "package.json");
+  const pp = JSON.parse(fs.readFileSync(p, "utf8"));
+  pp.version = version;
+  fs.writeFileSync(p, JSON.stringify(pp, null, 2) + "\n");
+}
+
+console.log(`prepare-publish: pinned all packages + optionalDependencies to ${version}`);
 for (const k of TARGETS) console.log(`  @mwguerra/hull-${k}@${version}`);

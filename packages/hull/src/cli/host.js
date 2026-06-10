@@ -34,13 +34,25 @@ export function binaryName(key, secure) {
   return key.startsWith("win32-") ? `${base}.exe` : base;
 }
 
+// npm tarballs packed in CI can lose the executable bit (the actions artifact
+// zip round-trip strips file modes), so a freshly installed host may not be
+// runnable on macOS/Linux. Repair it here so every caller gets a spawnable path.
+function ensureExecutable(bin) {
+  if (!bin || process.platform === "win32") return bin;
+  try { fs.accessSync(bin, fs.constants.X_OK); }
+  catch { try { fs.chmodSync(bin, 0o755); } catch { /* surfaces at spawn */ } }
+  return bin;
+}
+
 // Resolve a specific platform's prebuilt host. Returns null if neither the default
 // nor secure binary has been built yet (so callers can skip the platform).
 export async function resolveHostFor(key) {
   const mod = await loadPlatform(key);
   if (!mod || !mod.hostDir) return null;
-  const hostBinary = mod.hostBinary && fs.existsSync(mod.hostBinary) ? mod.hostBinary : null;
-  const secureBinary = mod.secureBinary && fs.existsSync(mod.secureBinary) ? mod.secureBinary : null;
+  const hostBinary = mod.hostBinary && fs.existsSync(mod.hostBinary)
+    ? ensureExecutable(mod.hostBinary) : null;
+  const secureBinary = mod.secureBinary && fs.existsSync(mod.secureBinary)
+    ? ensureExecutable(mod.secureBinary) : null;
   if (!hostBinary && !secureBinary) return null;
   return { key, pkg: `@mwguerra/hull-${key}`, hostDir: mod.hostDir, hostBinary, secureBinary };
 }

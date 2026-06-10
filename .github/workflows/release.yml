@@ -76,6 +76,9 @@ jobs:
             mkdir -p "packages/hull-$key/bin"
             cp -r artifacts/host-$key/* "packages/hull-$key/bin/" || true
           done
+          # upload/download-artifact strips file modes — restore the exec bit so the
+          # published tarballs install runnable hosts on macOS/Linux.
+          chmod +x packages/hull-darwin-arm64/bin/hull-host* packages/hull-linux-x64/bin/hull-host* 2>/dev/null || true
 
       # Pin optionalDependencies into the main package, then publish everything.
       - run: node scripts/prepare-publish.mjs "${GITHUB_REF_NAME#v}" || node scripts/prepare-publish.mjs
