@@ -2,8 +2,11 @@ import "./style.css";
 import {
   ping,
   httpPost,
+  httpGet,
   listPrinters,
   printMessage,
+  printReceipt,
+  printNetwork,
   saveSetting,
   loadSetting,
   loadAllSettings,
@@ -17,6 +20,7 @@ import {
   bridge,
   isNative,
   hasBridge,
+  bridgeMode,
 } from "@mwguerra/hull/bridge";
 import logoUrl from "./assets/hull-logo.svg";
 
@@ -27,7 +31,8 @@ const show = (el, on = true) => { el.hidden = !on; };
 $("logo").src = logoUrl;
 {
   const b = $("native-badge");
-  b.textContent = isNative() ? "native host" : hasBridge() ? "browser + bridge" : "browser";
+  const labels = { native: "native host", http: "browser + bridge", none: "browser" };
+  b.textContent = labels[bridgeMode()];
   b.className = "badge " + (hasBridge() ? "ok" : "no");
 }
 
@@ -105,15 +110,12 @@ $("cred-remove").addEventListener("click", async () => {
   } catch (e) { credStatus(e.message); }
 });
 
-// 4) http
-$("http-send").addEventListener("click", async () => {
-  const btn = $("http-send");
+// 4) http — POST and GET both run in C++ on a worker thread
+async function httpCall(btn, fn) {
   btn.disabled = true;
   show($("http-out"), false);
   try {
-    let body;
-    try { body = JSON.parse($("http-body").value); } catch { body = $("http-body").value; }
-    const res = await httpPost($("http-url").value, body);
+    const res = await fn();
     $("http-out").textContent = JSON.stringify(res, null, 2);
   } catch (e) {
     $("http-out").textContent = e.message;
@@ -121,7 +123,14 @@ $("http-send").addEventListener("click", async () => {
     btn.disabled = false;
     show($("http-out"));
   }
-});
+}
+$("http-send").addEventListener("click", () => httpCall($("http-send"), () => {
+  let body;
+  try { body = JSON.parse($("http-body").value); } catch { body = $("http-body").value; }
+  return httpPost($("http-url").value, body);
+}));
+$("http-get").addEventListener("click", () =>
+  httpCall($("http-get"), () => httpGet($("http-url").value)));
 
 // 5) printers
 $("pr-discover").addEventListener("click", async () => {
@@ -151,11 +160,37 @@ $("pr-print").addEventListener("click", async () => {
   }
   show($("pr-status"));
 });
+// raw ESC/POS through the spooler — for thermal receipt printers
+$("pr-receipt").addEventListener("click", async () => {
+  try {
+    const res = await printReceipt($("pr-select").value, $("pr-text").value);
+    $("pr-status").textContent = res?.ok ? "receipt sent (ESC/POS)" : res?.error ?? "print failed";
+  } catch (e) {
+    $("pr-status").textContent = e.message;
+  }
+  show($("pr-status"));
+});
+// raw ESC/POS straight to a network printer on TCP port 9100
+$("pr-net").addEventListener("click", async () => {
+  const host = $("pr-host").value.trim();
+  if (!host) { $("pr-status").textContent = "enter the printer IP first"; show($("pr-status")); return; }
+  try {
+    const res = await printNetwork(host, Number($("pr-port").value) || 9100, $("pr-text").value);
+    $("pr-status").textContent = res?.ok ? `receipt sent to ${host}` : res?.error ?? "print failed";
+  } catch (e) {
+    $("pr-status").textContent = e.message;
+  }
+  show($("pr-status"));
+});
 
 // 6) SQLite — a tiny notes app (migrate once, then CRUD), persisted on disk
 const dbErr = (msg) => { $("db-error").textContent = msg; show($("db-error")); };
 async function loadNotes() {
   try {
+    // db.get -> single row (here: the live count shown above the list)
+    const count = await db.get("SELECT COUNT(*) AS n FROM notes");
+    $("note-count").textContent = `${count?.n ?? 0} note(s) — counted via db.get`;
+    show($("note-count"));
     const rows = await db.query("SELECT id, body FROM notes ORDER BY id DESC");
     const ul = $("notes");
     ul.innerHTML = "";
@@ -185,6 +220,17 @@ async function deleteNote(id) {
 }
 $("note-add").addEventListener("click", addNote);
 $("note-body").addEventListener("keyup", (e) => { if (e.key === "Enter") addNote(); });
+// db.batch -> several statements in ONE atomic transaction
+$("note-batch").addEventListener("click", async () => {
+  try {
+    await db.batch([
+      { sql: "INSERT INTO notes (body) VALUES (?)", params: ["Sample: bridge calls run in C++"] },
+      { sql: "INSERT INTO notes (body) VALUES (?)", params: ["Sample: SQLite is parameterized"] },
+      { sql: "INSERT INTO notes (body) VALUES (?)", params: ["Sample: batch = one transaction"] },
+    ]);
+    await loadNotes();
+  } catch (e) { dbErr(e.message); }
+});
 
 // 7) Files — store/list/read/delete uploads in the per-user dir
 const fileErr = (msg) => { $("file-error").textContent = msg; show($("file-error")); };

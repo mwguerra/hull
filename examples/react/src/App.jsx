@@ -2,8 +2,11 @@ import { useEffect, useState } from "react";
 import {
   ping,
   httpPost,
+  httpGet,
   listPrinters,
   printMessage,
+  printReceipt,
+  printNetwork,
   saveSetting,
   loadSetting,
   loadAllSettings,
@@ -16,13 +19,13 @@ import {
   bridge,
   isNative,
   hasBridge,
+  bridgeMode,
 } from "@mwguerra/hull/bridge";
 import { useNativeState } from "@mwguerra/hull/react";
 import logoUrl from "./assets/hull-logo.svg";
 
 export default function App() {
-  const native = isNative();
-  const modeLabel = native ? "native host" : hasBridge() ? "browser + bridge" : "browser";
+  const modeLabel = { native: "native host", http: "browser + bridge", none: "browser" }[bridgeMode()];
   const [secure, setSecure] = useState(false);
 
   // 1) ping
@@ -82,19 +85,22 @@ export default function App() {
     catch (e) { setCredStatus(e.message); }
   };
 
-  // 4) http
-  const [url, setUrl] = useState("https://httpbin.org/post");
+  // 4) http — POST and GET both run in C++ on a worker thread
+  const [url, setUrl] = useState("https://httpbin.org/anything");
   const [body, setBody] = useState('{ "name": "Widget", "qty": 3 }');
   const [httpOut, setHttpOut] = useState(null);
   const [httpBusy, setHttpBusy] = useState(false);
-  const doPost = async () => {
+  const httpCall = async (fn) => {
     setHttpBusy(true); setHttpOut(null);
-    try {
-      let parsed; try { parsed = JSON.parse(body); } catch { parsed = body; }
-      setHttpOut(await httpPost(url, parsed));
-    } catch (e) { setHttpOut({ ok: false, error: e.message }); }
+    try { setHttpOut(await fn()); }
+    catch (e) { setHttpOut({ ok: false, error: e.message }); }
     finally { setHttpBusy(false); }
   };
+  const doPost = () => httpCall(() => {
+    let parsed; try { parsed = JSON.parse(body); } catch { parsed = body; }
+    return httpPost(url, parsed);
+  });
+  const doGet = () => httpCall(() => httpGet(url));
 
   // 5) printers
   const [printers, setPrinters] = useState([]);
@@ -113,14 +119,45 @@ export default function App() {
     try { const res = await printMessage(printer, printText); setPrintStatus(res?.ok ? "sent to spooler" : res?.error ?? "print failed"); }
     catch (e) { setPrintStatus(e.message); }
   };
+  // raw ESC/POS through the spooler — for thermal receipt printers
+  const testReceipt = async () => {
+    try { const res = await printReceipt(printer, printText); setPrintStatus(res?.ok ? "receipt sent (ESC/POS)" : res?.error ?? "print failed"); }
+    catch (e) { setPrintStatus(e.message); }
+  };
+  // raw ESC/POS straight to a network printer on TCP port 9100
+  const [netHost, setNetHost] = useState("");
+  const [netPort, setNetPort] = useState("9100");
+  const testNetwork = async () => {
+    if (!netHost.trim()) { setPrintStatus("enter the printer IP first"); return; }
+    try {
+      const res = await printNetwork(netHost.trim(), Number(netPort) || 9100, printText);
+      setPrintStatus(res?.ok ? `receipt sent to ${netHost.trim()}` : res?.error ?? "print failed");
+    } catch (e) { setPrintStatus(e.message); }
+  };
 
   // 6) SQLite — a tiny notes app (migrate once, then CRUD), persisted on disk
   const [notes, setNotes] = useState([]);
+  const [noteCount, setNoteCount] = useState(null);
   const [newNote, setNewNote] = useState("");
   const [dbError, setDbError] = useState(null);
   const loadNotes = async () => {
-    try { setNotes(await db.query("SELECT id, body FROM notes ORDER BY id DESC")); }
-    catch (e) { setDbError(e.message); }
+    try {
+      // db.get -> single row (here: the live count shown above the list)
+      const count = await db.get("SELECT COUNT(*) AS n FROM notes");
+      setNoteCount(count?.n ?? 0);
+      setNotes(await db.query("SELECT id, body FROM notes ORDER BY id DESC"));
+    } catch (e) { setDbError(e.message); }
+  };
+  // db.batch -> several statements in ONE atomic transaction
+  const addSamples = async () => {
+    try {
+      await db.batch([
+        { sql: "INSERT INTO notes (body) VALUES (?)", params: ["Sample: bridge calls run in C++"] },
+        { sql: "INSERT INTO notes (body) VALUES (?)", params: ["Sample: SQLite is parameterized"] },
+        { sql: "INSERT INTO notes (body) VALUES (?)", params: ["Sample: batch = one transaction"] },
+      ]);
+      await loadNotes();
+    } catch (e) { setDbError(e.message); }
   };
   const addNote = async () => {
     if (!newNote.trim()) return;
@@ -278,19 +315,22 @@ export default function App() {
       </section>
 
       <section className="card">
-        <h2>4 · HTTP POST (TLS, from C++)</h2>
-        <p className="hint">Runs on a C++ worker thread (cpp-httplib + OpenSSL). Adds a keychain <code>Bearer</code> token if one exists for the host.</p>
+        <h2>4 · HTTP (TLS, from C++)</h2>
+        <p className="hint">Runs on a C++ worker thread (cpp-httplib + OpenSSL). Adds a keychain <code>Bearer</code> token if one exists for the host. <code>httpbin.org/anything</code> echoes both verbs.</p>
         <label>URL</label>
         <input value={url} onChange={(e) => setUrl(e.target.value)} />
-        <label>JSON body</label>
+        <label>JSON body (POST)</label>
         <textarea rows={3} value={body} onChange={(e) => setBody(e.target.value)} />
-        <div className="actions"><button onClick={doPost} disabled={httpBusy}>{httpBusy ? "Sending…" : "POST"}</button></div>
+        <div className="actions">
+          <button onClick={doPost} disabled={httpBusy}>{httpBusy ? "Sending…" : "POST"}</button>
+          <button className="ghost" onClick={doGet} disabled={httpBusy}>GET</button>
+        </div>
         {httpOut && <pre>{JSON.stringify(httpOut, null, 2)}</pre>}
       </section>
 
       <section className="card">
         <h2>5 · Printers</h2>
-        <p className="hint">Discover (Winspool / CUPS), then print a test message — a text document that works with any printer, incl. Microsoft Print to PDF.</p>
+        <p className="hint">Discover (Winspool / CUPS), then print a test message — a text document that works with any printer, incl. Microsoft Print to PDF. Receipt buttons send raw ESC/POS for thermal printers (spooler or TCP port 9100).</p>
         <div className="actions"><button className="ghost" onClick={discover}>Discover printers</button></div>
         <label>Printer</label>
         <select value={printer} onChange={(e) => setPrinter(e.target.value)}>
@@ -299,7 +339,16 @@ export default function App() {
         </select>
         <label>Message</label>
         <input value={printText} onChange={(e) => setPrintText(e.target.value)} />
-        <div className="actions"><button onClick={testPrint} disabled={!printer}>Print test message</button></div>
+        <div className="actions">
+          <button onClick={testPrint} disabled={!printer}>Print test message</button>
+          <button className="ghost" onClick={testReceipt} disabled={!printer}>Print ESC/POS receipt</button>
+        </div>
+        <label>Network receipt printer (ESC/POS over TCP)</label>
+        <div className="grid2">
+          <input value={netHost} placeholder="printer IP, e.g. 192.168.0.50" onChange={(e) => setNetHost(e.target.value)} />
+          <input value={netPort} onChange={(e) => setNetPort(e.target.value)} />
+        </div>
+        <div className="actions"><button className="ghost" onClick={testNetwork}>Print via TCP/9100</button></div>
         {printStatus && <p className="status">{printStatus}</p>}
       </section>
 
@@ -313,6 +362,8 @@ export default function App() {
             onKeyUp={(e) => e.key === "Enter" && addNote()} />
           <button style={{ flex: "0 0 auto" }} onClick={addNote}>Add</button>
         </div>
+        <div className="actions"><button className="ghost" onClick={addSamples}>Add 3 samples (db.batch)</button></div>
+        {noteCount !== null && <p className="status">{noteCount} note(s) — counted via db.get</p>}
         <ul className="log">
           {notes.length === 0 && <li className="muted">no notes yet</li>}
           {notes.map((n) => (

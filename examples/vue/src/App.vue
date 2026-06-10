@@ -3,8 +3,11 @@ import { ref, reactive, watch, onMounted, onUnmounted } from "vue";
 import {
   ping,
   httpPost,
+  httpGet,
   listPrinters,
   printMessage,
+  printReceipt,
+  printNetwork,
   saveSetting,
   loadSetting,
   loadAllSettings,
@@ -17,12 +20,12 @@ import {
   bridge,
   isNative,
   hasBridge,
+  bridgeMode,
 } from "@mwguerra/hull/bridge";
 import { useNativeState } from "@mwguerra/hull/vue";
 import logoUrl from "./assets/hull-logo.svg";
 
-const native = isNative();
-const modeLabel = native ? "native host" : hasBridge() ? "browser + bridge" : "browser";
+const modeLabel = { native: "native host", http: "browser + bridge", none: "browser" }[bridgeMode()];
 const secure = ref(false);
 
 // 1) ping
@@ -84,18 +87,23 @@ async function removeCred() {
   catch (e) { credStatus.value = e.message; }
 }
 
-// 4) http
-const http = reactive({ url: "https://httpbin.org/post", body: '{ "name": "Widget", "qty": 3 }' });
+// 4) http — POST and GET both run in C++ on a worker thread
+const http = reactive({ url: "https://httpbin.org/anything", body: '{ "name": "Widget", "qty": 3 }' });
 const httpOut = ref(null);
 const httpBusy = ref(false);
-async function doPost() {
+async function httpCall(fn) {
   httpBusy.value = true; httpOut.value = null;
-  try {
-    let parsed; try { parsed = JSON.parse(http.body); } catch { parsed = http.body; }
-    httpOut.value = await httpPost(http.url, parsed);
-  } catch (e) { httpOut.value = { ok: false, error: e.message }; }
+  try { httpOut.value = await fn(); }
+  catch (e) { httpOut.value = { ok: false, error: e.message }; }
   finally { httpBusy.value = false; }
 }
+function doPost() {
+  return httpCall(() => {
+    let parsed; try { parsed = JSON.parse(http.body); } catch { parsed = http.body; }
+    return httpPost(http.url, parsed);
+  });
+}
+function doGet() { return httpCall(() => httpGet(http.url)); }
 
 // 5) printers
 const printers = ref([]);
@@ -113,14 +121,45 @@ async function testPrint() {
   try { const res = await printMessage(printer.value, printText.value); printStatus.value = res?.ok ? "sent to spooler" : res?.error ?? "print failed"; }
   catch (e) { printStatus.value = e.message; }
 }
+// raw ESC/POS through the spooler — for thermal receipt printers
+async function testReceipt() {
+  try { const res = await printReceipt(printer.value, printText.value); printStatus.value = res?.ok ? "receipt sent (ESC/POS)" : res?.error ?? "print failed"; }
+  catch (e) { printStatus.value = e.message; }
+}
+// raw ESC/POS straight to a network printer on TCP port 9100
+const netHost = ref("");
+const netPort = ref("9100");
+async function testNetwork() {
+  if (!netHost.value.trim()) { printStatus.value = "enter the printer IP first"; return; }
+  try {
+    const res = await printNetwork(netHost.value.trim(), Number(netPort.value) || 9100, printText.value);
+    printStatus.value = res?.ok ? `receipt sent to ${netHost.value.trim()}` : res?.error ?? "print failed";
+  } catch (e) { printStatus.value = e.message; }
+}
 
 // 6) SQLite — a tiny notes app (migrate once, then CRUD), persisted on disk
 const notes = ref([]);
+const noteCount = ref(null);
 const newNote = ref("");
 const dbError = ref(null);
 async function loadNotes() {
-  try { notes.value = await db.query("SELECT id, body FROM notes ORDER BY id DESC"); }
-  catch (e) { dbError.value = e.message; }
+  try {
+    // db.get -> single row (here: the live count shown above the list)
+    const count = await db.get("SELECT COUNT(*) AS n FROM notes");
+    noteCount.value = count?.n ?? 0;
+    notes.value = await db.query("SELECT id, body FROM notes ORDER BY id DESC");
+  } catch (e) { dbError.value = e.message; }
+}
+// db.batch -> several statements in ONE atomic transaction
+async function addSamples() {
+  try {
+    await db.batch([
+      { sql: "INSERT INTO notes (body) VALUES (?)", params: ["Sample: bridge calls run in C++"] },
+      { sql: "INSERT INTO notes (body) VALUES (?)", params: ["Sample: SQLite is parameterized"] },
+      { sql: "INSERT INTO notes (body) VALUES (?)", params: ["Sample: batch = one transaction"] },
+    ]);
+    await loadNotes();
+  } catch (e) { dbError.value = e.message; }
 }
 async function addNote() {
   if (!newNote.value.trim()) return;
@@ -284,19 +323,22 @@ onUnmounted(() => { if (imageUrl.value) URL.revokeObjectURL(imageUrl.value); });
     </section>
 
     <section class="card">
-      <h2>4 · HTTP POST (TLS, from C++)</h2>
-      <p class="hint">Runs on a C++ worker thread (cpp-httplib + OpenSSL). Adds a keychain <code>Bearer</code> token if one exists for the host.</p>
+      <h2>4 · HTTP (TLS, from C++)</h2>
+      <p class="hint">Runs on a C++ worker thread (cpp-httplib + OpenSSL). Adds a keychain <code>Bearer</code> token if one exists for the host. <code>httpbin.org/anything</code> echoes both verbs.</p>
       <label>URL</label>
       <input v-model="http.url" />
-      <label>JSON body</label>
+      <label>JSON body (POST)</label>
       <textarea v-model="http.body" rows="3"></textarea>
-      <div class="actions"><button @click="doPost" :disabled="httpBusy">{{ httpBusy ? "Sending…" : "POST" }}</button></div>
+      <div class="actions">
+        <button @click="doPost" :disabled="httpBusy">{{ httpBusy ? "Sending…" : "POST" }}</button>
+        <button class="ghost" @click="doGet" :disabled="httpBusy">GET</button>
+      </div>
       <pre v-if="httpOut">{{ httpOut }}</pre>
     </section>
 
     <section class="card">
       <h2>5 · Printers</h2>
-      <p class="hint">Discover (Winspool / CUPS), then print a test message — a text document that works with any printer, incl. Microsoft Print to PDF.</p>
+      <p class="hint">Discover (Winspool / CUPS), then print a test message — a text document that works with any printer, incl. Microsoft Print to PDF. Receipt buttons send raw ESC/POS for thermal printers (spooler or TCP port 9100).</p>
       <div class="actions"><button class="ghost" @click="discover">Discover printers</button></div>
       <label>Printer</label>
       <select v-model="printer">
@@ -305,7 +347,16 @@ onUnmounted(() => { if (imageUrl.value) URL.revokeObjectURL(imageUrl.value); });
       </select>
       <label>Message</label>
       <input v-model="printText" />
-      <div class="actions"><button @click="testPrint" :disabled="!printer">Print test message</button></div>
+      <div class="actions">
+        <button @click="testPrint" :disabled="!printer">Print test message</button>
+        <button class="ghost" @click="testReceipt" :disabled="!printer">Print ESC/POS receipt</button>
+      </div>
+      <label>Network receipt printer (ESC/POS over TCP)</label>
+      <div class="grid2">
+        <input v-model="netHost" placeholder="printer IP, e.g. 192.168.0.50" />
+        <input v-model="netPort" />
+      </div>
+      <div class="actions"><button class="ghost" @click="testNetwork">Print via TCP/9100</button></div>
       <p v-if="printStatus" class="status">{{ printStatus }}</p>
     </section>
 
@@ -317,6 +368,8 @@ onUnmounted(() => { if (imageUrl.value) URL.revokeObjectURL(imageUrl.value); });
         <input v-model="newNote" placeholder="Write a note…" @keyup.enter="addNote" />
         <button style="flex:0 0 auto" @click="addNote">Add</button>
       </div>
+      <div class="actions"><button class="ghost" @click="addSamples">Add 3 samples (db.batch)</button></div>
+      <p v-if="noteCount !== null" class="status">{{ noteCount }} note(s) — counted via db.get</p>
       <ul class="log">
         <li v-if="!notes.length" class="muted">no notes yet</li>
         <li v-for="n in notes" :key="n.id" style="display:flex;justify-content:space-between;gap:.5rem">

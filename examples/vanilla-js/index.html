@@ -73,27 +73,42 @@
 
       <!-- 4) HTTP -->
       <section class="card">
-        <h2>4 · HTTP POST (TLS, from C++)</h2>
+        <h2>4 · HTTP (TLS, from C++)</h2>
         <p class="hint">Runs on a C++ worker thread (cpp-httplib + OpenSSL). Adds a
-          keychain <code>Bearer</code> token if one exists for the host.</p>
+          keychain <code>Bearer</code> token if one exists for the host.
+          <code>httpbin.org/anything</code> echoes both verbs.</p>
         <label>URL</label>
-        <input id="http-url" value="https://httpbin.org/post" />
-        <label>JSON body</label>
+        <input id="http-url" value="https://httpbin.org/anything" />
+        <label>JSON body (POST)</label>
         <textarea id="http-body" rows="3">{ "name": "Widget", "qty": 3 }</textarea>
-        <div class="actions"><button id="http-send">POST</button></div>
+        <div class="actions">
+          <button id="http-send">POST</button>
+          <button id="http-get" class="ghost">GET</button>
+        </div>
         <pre id="http-out" hidden></pre>
       </section>
 
       <!-- 5) Printers -->
       <section class="card">
         <h2>5 · Printers</h2>
-        <p class="hint">Discover (Winspool / CUPS), then print a test message — a text document that works with any printer, incl. Microsoft Print to PDF.</p>
+        <p class="hint">Discover (Winspool / CUPS), then print a test message — a text document
+          that works with any printer, incl. Microsoft Print to PDF. Receipt buttons send raw
+          ESC/POS for thermal printers (spooler or TCP port 9100).</p>
         <div class="actions"><button id="pr-discover" class="ghost">Discover printers</button></div>
         <label>Printer</label>
         <select id="pr-select"><option value="">— none —</option></select>
         <label>Message</label>
         <input id="pr-text" value="Hello from Hull!" />
-        <div class="actions"><button id="pr-print">Print test message</button></div>
+        <div class="actions">
+          <button id="pr-print">Print test message</button>
+          <button id="pr-receipt" class="ghost">Print ESC/POS receipt</button>
+        </div>
+        <label>Network receipt printer (ESC/POS over TCP)</label>
+        <div class="grid2">
+          <input id="pr-host" placeholder="printer IP, e.g. 192.168.0.50" />
+          <input id="pr-port" value="9100" />
+        </div>
+        <div class="actions"><button id="pr-net" class="ghost">Print via TCP/9100</button></div>
         <p id="pr-status" class="status" hidden></p>
       </section>
 
@@ -106,6 +121,8 @@
           <input id="note-body" placeholder="Write a note…" />
           <button id="note-add" style="flex:0 0 auto">Add</button>
         </div>
+        <div class="actions"><button id="note-batch" class="ghost">Add 3 samples (db.batch)</button></div>
+        <p id="note-count" class="status" hidden></p>
         <ul id="notes" class="log"><li class="muted">no notes yet</li></ul>
         <p id="db-error" class="err" hidden></p>
       </section>
