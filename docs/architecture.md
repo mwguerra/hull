@@ -44,7 +44,7 @@ dependencies (`@mwguerra/hull-win32-x64`, …) — npm installs only the one mat
 the machine. This is the same model esbuild and swc use.
 
 The standard bindings (HTTP, storage, keychain, printing, SQLite, files, window
-control + links) are compiled into the host and available to every app. The host
+control + links, notifications) are compiled into the host and available to every app. The host
 also injects a **link policy** into the app web view (external links open in the OS
 default browser, never inside the app — see
 [features.md](features.md#9--window-control--links)). For **app-specific** native code, `hull eject`

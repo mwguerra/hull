@@ -89,6 +89,9 @@ error; most others return `{ok, ...}`).
   act (the e2e hook).
 - `window_ctl.hpp` — native fullscreen: Win32 borderless (style+placement save/restore),
   macOS `toggleFullScreen:` (animated, async), GTK4 `gtk_window_fullscreen`.
+- `notifications.hpp` — system notifications with zero new dependencies: Windows
+  tray-balloon→toast, macOS `NSUserNotification` (osascript fallback for the
+  unbundled dev binary), Linux D-Bus `org.freedesktop.Notifications` via gio.
 - `link_script.hpp` — injected at document start on every navigation. Two layers:
   an **origin guard** (any non-app-origin document gets every binding, the webview
   RPC object, and `__bridgeEmit` stripped before its first script runs) and the

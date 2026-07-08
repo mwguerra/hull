@@ -18,6 +18,7 @@ Each call goes UI → C++ and returns a `Promise`. All three examples
 | `setFullscreen(on)` / `isFullscreen()` / `toggleFullscreen()` | native window fullscreen (Win32 / macOS Spaces / GTK4); DOM Fullscreen fallback in a browser |
 | `openExternal(url)` | open `http/https/mailto/tel` with the **OS default browser/handler** — the default for every external link (see below) |
 | `openWindow(url, {title,width,height})` | opt-in: open web content in a **new Hull window** (plain web view, no bridge bindings) |
+| `notify(title, body)` | system notification (Windows toast/balloon, macOS Notification Center, Linux D-Bus); Web Notification API in a browser |
 | `appInfo()` | `{ ok, appId, secure }` — `secure` is true on a crypto build |
 | `isNative()` / `hasBridge()` / `bridgeMode()` | `isNative` = native web view; `hasBridge` = reachable (native **or** browser dev); `bridgeMode` = `"native"`/`"http"`/`"none"` |
 | `bridge.on(event, cb)` | subscribe to C++ → UI push events |
@@ -254,6 +255,35 @@ webview RPC object, and the event hook stripped** before its first script runs.
 A foreign page inside the bridged window is just a page. This is covered by the
 e2e suite (`npm run test:e2e`), which navigates the app window to a foreign
 origin and verifies nothing leaks.
+
+## 10 · System notifications
+
+```js
+import { notify } from "@mwguerra/hull/bridge";
+
+await notify("Order ready", "Table 12 — 2 items");   // { ok: true }
+await notify("Ping");                                 // body is optional
+```
+
+An empty title falls back to the app title (native host; in a browser the title
+is used as-is). Per platform:
+
+- **Windows** — a notification balloon attached to the app window's tray icon:
+  shows as a toast and lands in the **Action Center** on Windows 10/11. Uses the
+  app's window icon.
+- **macOS** — packaged apps (`hull start`, installed `.app`) post to the
+  **Notification Center**, attributed to the app (the OS asks the user for
+  permission on first use). The raw dev binary (`hull dev`) has no bundle id, so
+  the host falls back to `osascript` — the notification still shows, attributed
+  to Script Editor.
+- **Linux** — `org.freedesktop.Notifications` over **D-Bus** (works on GNOME,
+  KDE, and anything running a notification daemon). The `.hullrc` `window.icon`
+  is passed through and shown when the daemon supports it.
+- **Browser** (dev mode / plain web) — the **Web Notification API**; the browser
+  prompts for permission, so call `notify` from a click handler the first time.
+
+Notifications are fire-and-forget: `{ ok }` means "dispatched", not "seen" —
+the OS user settings decide whether it's displayed.
 
 ## Browser modes
 

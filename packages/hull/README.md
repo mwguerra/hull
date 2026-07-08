@@ -470,6 +470,7 @@ All from `@mwguerra/hull/bridge`:
 | `setFullscreen(on)` / `isFullscreen()` / `toggleFullscreen()` | native window fullscreen; DOM Fullscreen fallback in a browser |
 | `openExternal(url)` | open `http/https/mailto/tel` with the **OS default browser/handler** — the default for every external link |
 | `openWindow(url, {title,width,height})` | opt-in: open web content in a **new Hull window** (plain web view, no bridge) |
+| `notify(title, body)` | system notification (toast / Notification Center / D-Bus); Web Notification API in a browser |
 | `appInfo()` | `{ ok, appId, secure }` — `secure` true on a crypto build |
 | `bridge.on(event, fn)` | subscribe to C++ → UI push events (e.g. `settings:changed`); returns an unsubscribe fn |
 | `hasBridge()` / `isNative()` / `bridgeMode()` | `hasBridge` = reachable (native or browser dev); `isNative` = native web view; `bridgeMode` = `"native"`/`"http"`/`"none"` |

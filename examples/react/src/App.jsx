@@ -23,6 +23,7 @@ import {
   toggleFullscreen,
   isFullscreen,
   openExternal,
+  notify,
 } from "@mwguerra/hull/bridge";
 import { useNativeState } from "@mwguerra/hull/react";
 import logoUrl from "./assets/hull-logo.svg";
@@ -253,6 +254,12 @@ export default function App() {
     e.preventDefault();
     openExternal("https://github.com/mwguerra/hull").catch(console.error);
   };
+  const sendNotification = async () => {
+    try {
+      const res = await notify("Hull", "Hello from the React example!");
+      setFsStatus(res?.ok ? "notification sent" : res?.error ?? "failed");
+    } catch (e) { setFsStatus(e.message); }
+  };
 
   useEffect(() => {
     if (!hasBridge()) return; // backend works in the native host or browser dev mode
@@ -441,13 +448,14 @@ export default function App() {
       </section>
 
       <section className="card">
-        <h2>9 · Window & links</h2>
-        <p className="hint">Native fullscreen from JS, and the link policy: any external link
-          opens in the <strong>OS default browser</strong> — never inside the app.
-          <code>data-hull-window</code> opts a link into a new Hull window instead.</p>
+        <h2>9 · Window, links &amp; notifications</h2>
+        <p className="hint">Native fullscreen from JS, system notifications, and the link
+          policy: any external link opens in the <strong>OS default browser</strong> — never
+          inside the app. <code>data-hull-window</code> opts a link into a new Hull window instead.</p>
         <div className="actions">
           <button onClick={doFullscreen}>Toggle fullscreen</button>
           <button className="ghost" onClick={checkFullscreen}>Check state</button>
+          <button className="ghost" onClick={sendNotification}>Send notification</button>
         </div>
         {fsStatus && <p className="status">{fsStatus}</p>}
         <label style={{ marginTop: ".8rem" }}>Links</label>

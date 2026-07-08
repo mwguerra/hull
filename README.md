@@ -79,7 +79,7 @@ bindings and compile your own host.
   `installer` all run. Packaged Windows app ~8 MB unpacked (~3.5 MB zipped).
 - **Examples** — vanilla JS, React, Vue, each exercising all features (bridge, settings + events, credentials, HTTP, printing, SQLite, files, image upload, fullscreen + links); all build + launch.
 - **Releases** — versioned (`vX.Y.Z`/`development`), per-platform archives (zip/tar.gz) + native **installers** (`.dmg` / `.deb` / `.exe`).
-- **Capabilities** — HTTP/TLS, encrypted-at-rest (opt-in secure build: AES + SQLCipher), OS keychain, printing (documents + ESC/POS), **SQLite**, file storage, two-way state, **native fullscreen** (config/CLI/runtime), **smart links** (external links open in the OS default browser; opt-in in-app windows).
+- **Capabilities** — HTTP/TLS, encrypted-at-rest (opt-in secure build: AES + SQLCipher), OS keychain, printing (documents + ESC/POS), **SQLite**, file storage, two-way state, **native fullscreen** (config/CLI/runtime), **smart links** (external links open in the OS default browser; opt-in in-app windows), **system notifications**.
 - **Tests** — `npm test` (JS unit + C++ URL-policy) and `npm run test:e2e` (drives a real host window: link policy + fullscreen, observed over the inspector trace).
 - **DX** — `-v` timings on all commands; **browser dev mode** (`hull dev --browser`, full HMR, no recompile) + a dev-only **inspector** window (stripped from production).
 - **Not yet** — code-signing / notarization (installers are unsigned); macOS is unsigned + the `.app`'s OpenSSL dylibs aren't bundled for *other* Macs yet.

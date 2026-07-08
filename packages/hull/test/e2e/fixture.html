@@ -35,6 +35,7 @@
         await sleep(60);
         window.open("https://example.com/scripted");   // scripted open -> OS browser
         window.open("javascript:alert(1)");            // must be swallowed
+        await window.notify("e2e title", "e2e body");  // dry-run prints, replies ok
         await sleep(250);
         await window.ping(JSON.stringify({
           stage: "links-done",

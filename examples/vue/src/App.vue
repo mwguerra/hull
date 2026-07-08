@@ -22,6 +22,7 @@ import {
   hasBridge,
   bridgeMode,
   toggleFullscreen,
+  notify,
   isFullscreen,
   openExternal,
 } from "@mwguerra/hull/bridge";
@@ -260,6 +261,12 @@ async function checkFullscreen() {
 function openRepo() {
   openExternal("https://github.com/mwguerra/hull").catch(console.error);
 }
+async function sendNotification() {
+  try {
+    const res = await notify("Hull", "Hello from the Vue example!");
+    fsStatus.value = res?.ok ? "notification sent" : res?.error ?? "failed";
+  } catch (e) { fsStatus.value = e.message; }
+}
 
 onMounted(async () => {
   if (!hasBridge()) return; // backend works in the native host or browser dev mode
@@ -440,13 +447,14 @@ onUnmounted(() => { if (imageUrl.value) URL.revokeObjectURL(imageUrl.value); });
     </section>
 
     <section class="card">
-      <h2>9 · Window &amp; links</h2>
-      <p class="hint">Native fullscreen from JS, and the link policy: any external link
-        opens in the <strong>OS default browser</strong> — never inside the app.
-        <code>data-hull-window</code> opts a link into a new Hull window instead.</p>
+      <h2>9 · Window, links &amp; notifications</h2>
+      <p class="hint">Native fullscreen from JS, system notifications, and the link policy:
+        any external link opens in the <strong>OS default browser</strong> — never inside
+        the app. <code>data-hull-window</code> opts a link into a new Hull window instead.</p>
       <div class="actions">
         <button @click="doFullscreen">Toggle fullscreen</button>
         <button class="ghost" @click="checkFullscreen">Check state</button>
+        <button class="ghost" @click="sendNotification">Send notification</button>
       </div>
       <p v-if="fsStatus" class="status">{{ fsStatus }}</p>
       <label style="margin-top:.8rem">Links</label>

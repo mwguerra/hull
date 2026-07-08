@@ -24,6 +24,7 @@ import {
   toggleFullscreen,
   isFullscreen,
   openExternal,
+  notify,
 } from "@mwguerra/hull/bridge";
 import logoUrl from "./assets/hull-logo.svg";
 
@@ -346,6 +347,12 @@ $("fs-check").addEventListener("click", async () => {
 $("open-api").addEventListener("click", (e) => {
   e.preventDefault();
   openExternal("https://github.com/mwguerra/hull").catch(console.error);
+});
+$("notify-send").addEventListener("click", async () => {
+  try {
+    const res = await notify("Hull", "Hello from the vanilla example!");
+    fsStatus(res?.ok ? "notification sent" : res?.error ?? "failed");
+  } catch (e) { fsStatus(e.message); }
 });
 
 // init backend-backed sections (native host or browser dev mode)

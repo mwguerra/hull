@@ -13,6 +13,9 @@ different branch per OS behind `#if defined(_WIN32) / __APPLE__ / else`.
 | Runtime needed by users | WebView2 runtime (ships w/ Win 11) | built in | `libwebkitgtk-6.0` / `libwebkit2gtk-4.1` |
 | Keychain | Credential Manager | Keychain | Secret Service (libsecret) |
 | Printing | Winspool (RAW) | CUPS | CUPS |
+| Notifications | tray balloon → toast/Action Center | Notification Center (`.app`) / osascript (dev) | D-Bus `org.freedesktop.Notifications` |
+| Fullscreen | borderless (monitor bounds) | fullscreen Space (animated) | `gtk_window_fullscreen` |
+| Open external link | `ShellExecuteW` | `NSWorkspace openURL:` | gio `launch_default_for_uri` |
 | Port-9100 raw socket | Winsock (`ws2_32`) | POSIX sockets | POSIX sockets |
 | Storage dir | `%LOCALAPPDATA%\<appId>` | `~/Library/Application Support/<appId>` | `$XDG_DATA_HOME/<appId>` or `~/.local/share/<appId>` |
 | File permission lockdown | per-user `%LOCALAPPDATA%` | `chmod 0600` / dir `0700` | `chmod 0600` / dir `0700` |
@@ -48,6 +51,19 @@ so each app gets its own storage namespace and keychain entries.
   build, port the `__APPLE__` branch to `SecItemAdd` / `SecItemCopyMatching` /
   `SecItemDelete` with `kSecClass = kSecClassGenericPassword`.
 - **Linux needs a Secret Service** at runtime (see above).
+
+## Notification caveats
+
+- **macOS uses the deprecated `NSUserNotification` API** (same trade-off as the
+  keychain: works everywhere, no bundle-signing requirements that
+  `UNUserNotificationCenter` adds). Notification Center requires a bundle id, so
+  it's used by packaged `.app`s; the raw dev binary falls back to `osascript`
+  (the notification shows, attributed to Script Editor).
+- **Windows** balloons need the app window (they attach a tray icon to it), so
+  `notify` replies with an error in headless serve mode — browser dev mode uses
+  the Web Notification API instead.
+- **Linux** requires a notification daemon on the session bus (present on GNOME,
+  KDE, and every mainstream desktop).
 
 ## Printing notes
 

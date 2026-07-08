@@ -33,6 +33,7 @@
 #include "shell.hpp"           // OS default-browser open + child-window spawn
 #include "window_ctl.hpp"      // native fullscreen (HWND / NSWindow / GtkWindow)
 #include "link_script.hpp"     // injected link policy (external links -> OS browser)
+#include "notifications.hpp"   // system notifications (balloon / NSUserNotification / D-Bus)
 #include "bindings/printer.hpp"
 #include "bindings/storage.hpp"
 #include "bindings/credentials.hpp"
@@ -383,6 +384,35 @@ void register_window_bindings(Dispatcher& d, WindowCtx* wc, const Options& opt) 
       // macOS animates the transition, so report the REQUESTED state on success.
       reply(json{{"ok", ok}, {"fullscreen", ok ? on : window_ctl::is_fullscreen(wc->handle())}});
     });
+  });
+
+  d.on("notify", [wc, opt](const json& a, Reply reply) {
+    const std::string title = (!a.empty() && a.at(0).is_string() && !a.at(0).get<std::string>().empty())
+        ? a.at(0).get<std::string>() : opt.title;
+    const std::string body = (a.size() > 1 && a.at(1).is_string()) ? a.at(1).get<std::string>() : "";
+#if defined(_WIN32)
+    if (!wc->view) { // Windows balloons attach to the app window
+      reply(json{{"ok", false}, {"error", "notify: no native window (browser dev mode)"}});
+      return;
+    }
+#endif
+    const std::string icon = opt.icon.value_or("");
+#if defined(__linux__)
+    // D-Bus can block (bus connect + up to 3s call timeout) — keep it off the
+    // GTK main loop. No window handle is needed on Linux.
+    std::thread([title, body, opt, icon, reply] {
+      const bool ok = notifications::show(nullptr, title, body, opt.title, icon);
+      reply(json{{"ok", ok},
+                 {"error", ok ? json(nullptr) : json("failed to dispatch the notification")}});
+    }).detach();
+#else
+    wc->run_on_ui([wc, title, body, opt, icon, reply] {
+      const bool ok = notifications::show(wc->view ? wc->handle() : nullptr,
+                                          title, body, opt.title, icon);
+      reply(json{{"ok", ok},
+                 {"error", ok ? json(nullptr) : json("failed to dispatch the notification")}});
+    });
+#endif
   });
 
   d.on("isFullscreen", [wc](const json&, Reply reply) {

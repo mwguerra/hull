@@ -49,6 +49,24 @@ export const toggleFullscreen = async () => {
   return setFullscreen(!cur.fullscreen);
 };
 
+// System notification (Windows toast/balloon, macOS Notification Center,
+// Linux D-Bus). Title defaults to the app title when empty. In the browser
+// (dev mode / plain web) this uses the Web Notification API, which needs the
+// user's permission — request it from a click handler for best results.
+export const notify = async (title, body = "") => {
+  if (isNative()) return call("notify", String(title ?? ""), String(body));
+  if (typeof Notification === "undefined") {
+    return { ok: false, error: "notifications are not supported in this browser" };
+  }
+  let permission = Notification.permission;
+  if (permission === "default") permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    return { ok: false, error: `notification permission ${permission}` };
+  }
+  new Notification(String(title ?? ""), { body: String(body) });
+  return { ok: true };
+};
+
 // Open a URL with the OS default handler (http/https/mailto/tel — the default
 // for every external link the app renders; see the link policy in features.md).
 export const openExternal = (url) => {

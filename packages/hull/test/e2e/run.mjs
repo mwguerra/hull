@@ -168,6 +168,16 @@ try {
         "page did NOT navigate away from the app");
   check(payload.hash === "#local", "in-page hash link kept its default behavior");
 
+  // --- notifications (dry-run: proves binding registration + arg plumbing; the
+  // platform dispatch itself is exercised by the real-notification smoke test) ---
+  const notifyCalls = calls("notify");
+  check(notifyCalls.length === 1 &&
+        notifyCalls[0].args?.[0] === "e2e title" && notifyCalls[0].args?.[1] === "e2e body",
+        "notify(title, body) called with the right args");
+  const notifyReplies = traces.filter((t) => t.type === "reply" && t.name === "notify");
+  check(notifyReplies.length === 1 && notifyReplies[0].ok === true,
+        "notify(title, body) dispatched ok");
+
   // --- URL policy over the bridge (fail closed) ---
   const bad = await invoke(base, "openExternal", ["file:///etc/passwd"]);
   check(bad.ok === false, "openExternal rejects file:// URLs");

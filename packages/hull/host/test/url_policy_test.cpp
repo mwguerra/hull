@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <string>
 #include "url_policy.hpp"
+#include "notify_text.hpp"
 
 static int failures = 0;
 static void check(bool cond, const char* what) {
@@ -63,6 +64,12 @@ int main() {
     check(has_url, "child window argv carries --url <url>");
     check(args.size() == 10, "argv has exactly 10 entries");
   }
+
+  // AppleScript escaping (macOS notification fallback) — quotes/backslashes only
+  check(notify_text::applescript_escape("plain text") == "plain text", "escape: passthrough");
+  check(notify_text::applescript_escape("say \"hi\"") == "say \\\"hi\\\"", "escape: quotes");
+  check(notify_text::applescript_escape("back\\slash") == "back\\\\slash", "escape: backslash");
+  check(notify_text::applescript_escape("") == "", "escape: empty");
 
   if (failures) { std::printf("\n%d FAILURE(S)\n", failures); return 1; }
   std::printf("\nall url_policy tests passed\n");
