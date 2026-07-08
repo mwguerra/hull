@@ -115,7 +115,12 @@ function buildNative(key, secure) {
   for (const f of fs.readdirSync(srcBin)) {
     if (skip.has(f) || skipExt.has(path.extname(f))) continue;
     if (f.startsWith("hull-host") || f.endsWith(".dll") || f.endsWith(".dylib") || f.endsWith(".so")) {
-      fs.copyFileSync(path.join(srcBin, f), path.join(out, f));
+      const dest = path.join(out, f);
+      // Remove first: overwriting a Mach-O in place keeps the inode, and macOS
+      // then SIGKILLs the binary for a stale code signature. A fresh file
+      // (new inode) keeps the ad-hoc signature valid.
+      fs.rmSync(dest, { force: true });
+      fs.copyFileSync(path.join(srcBin, f), dest);
     }
   }
   console.log(`  staged ${key} -> packages/hull-${key}/bin`);
