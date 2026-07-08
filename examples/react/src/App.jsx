@@ -20,6 +20,9 @@ import {
   isNative,
   hasBridge,
   bridgeMode,
+  toggleFullscreen,
+  isFullscreen,
+  openExternal,
 } from "@mwguerra/hull/bridge";
 import { useNativeState } from "@mwguerra/hull/react";
 import logoUrl from "./assets/hull-logo.svg";
@@ -231,6 +234,26 @@ export default function App() {
     } catch (e) { setImageError(e.message); }
   };
 
+  // 9) Window & links — native fullscreen + the link policy. External links need no
+  // JS at all (the host intercepts them); openExternal() is the programmatic path.
+  const [fsStatus, setFsStatus] = useState(null);
+  const doFullscreen = async () => {
+    try {
+      const res = await toggleFullscreen();
+      setFsStatus(res?.ok ? (res.fullscreen ? "fullscreen" : "windowed") : res?.error ?? "failed");
+    } catch (e) { setFsStatus(e.message); }
+  };
+  const checkFullscreen = async () => {
+    try {
+      const res = await isFullscreen();
+      setFsStatus(res?.ok ? `fullscreen: ${res.fullscreen}` : res?.error ?? "failed");
+    } catch (e) { setFsStatus(e.message); }
+  };
+  const openRepo = (e) => {
+    e.preventDefault();
+    openExternal("https://github.com/mwguerra/hull").catch(console.error);
+  };
+
   useEffect(() => {
     if (!hasBridge()) return; // backend works in the native host or browser dev mode
     (async () => {
@@ -415,6 +438,24 @@ export default function App() {
           <p className="muted">no image uploaded yet</p>
         )}
         {imageError && <p className="err">{imageError}</p>}
+      </section>
+
+      <section className="card">
+        <h2>9 · Window & links</h2>
+        <p className="hint">Native fullscreen from JS, and the link policy: any external link
+          opens in the <strong>OS default browser</strong> — never inside the app.
+          <code>data-hull-window</code> opts a link into a new Hull window instead.</p>
+        <div className="actions">
+          <button onClick={doFullscreen}>Toggle fullscreen</button>
+          <button className="ghost" onClick={checkFullscreen}>Check state</button>
+        </div>
+        {fsStatus && <p className="status">{fsStatus}</p>}
+        <label style={{ marginTop: ".8rem" }}>Links</label>
+        <ul className="log">
+          <li><a href="https://github.com/mwguerra/hull">External link → OS default browser (default)</a></li>
+          <li><a href="https://github.com/mwguerra/hull" data-hull-window="true">Opt-in link → new Hull window (<code>data-hull-window</code>)</a></li>
+          <li><a href="#" onClick={openRepo}>Programmatic: <code>openExternal(url)</code></a></li>
+        </ul>
       </section>
 
       <footer>Built with @mwguerra/hull · no Electron, no bundled browser</footer>

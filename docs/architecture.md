@@ -29,6 +29,8 @@ recompiled per project. The host is parameterized at launch:
 | `--title`, `--width`, `--height` | window chrome |
 | `--icon <path>` | window/app icon (Windows runtime; macOS/Linux via bundle/.desktop) |
 | `--app-id <id>` | namespaces per-app storage + keychain |
+| `--fullscreen` | open the window in fullscreen (from `.hullrc` `window.fullscreen` or `hull dev|start --fullscreen`) |
+| `--no-bridge` | plain web-view window: no bindings, no link policy (how `openWindow` children are spawned) |
 | `--debug` | open dev tools |
 
 On Linux the host also reads two env vars for the WebKitGTK sandbox —
@@ -41,8 +43,11 @@ go" is possible. Per-platform binaries are delivered as os/cpu-gated optional
 dependencies (`@mwguerra/hull-win32-x64`, …) — npm installs only the one matching
 the machine. This is the same model esbuild and swc use.
 
-The standard bindings (HTTP, storage, keychain, printing, SQLite) are compiled into
-the host and available to every app. For **app-specific** native code, `hull eject`
+The standard bindings (HTTP, storage, keychain, printing, SQLite, files, window
+control + links) are compiled into the host and available to every app. The host
+also injects a **link policy** into the app web view (external links open in the OS
+default browser, never inside the app — see
+[features.md](features.md#9--window-control--links)). For **app-specific** native code, `hull eject`
 emits the C++ project so you can add bindings and build your own host — see
 [native-code.md](native-code.md).
 

@@ -29,6 +29,10 @@
 #include "bindings/http.hpp"   // pulls httplib first (Linux X11 macro clash)
 #include "serve.hpp"           // httplib HTTP/SSE bridge server
 #include "webview/webview.h"
+#include "url_policy.hpp"      // which URLs may leave the app (pure, unit-tested)
+#include "shell.hpp"           // OS default-browser open + child-window spawn
+#include "window_ctl.hpp"      // native fullscreen (HWND / NSWindow / GtkWindow)
+#include "link_script.hpp"     // injected link policy (external links -> OS browser)
 #include "bindings/printer.hpp"
 #include "bindings/storage.hpp"
 #include "bindings/credentials.hpp"
@@ -277,6 +281,8 @@ struct Options {
   int height = 760;
   bool debug = false;
   bool inspect = false;
+  bool fullscreen = false;  // start the window in fullscreen
+  bool no_bridge = false;   // plain web-view window: no bindings, no link policy
 };
 
 std::optional<std::string> next_arg(int argc, char** argv, int& i) {
@@ -299,6 +305,8 @@ Options parse_args(int argc, char** argv) {
     else if (a == "--height") { if (auto v = next_arg(argc, argv, i)) o.height = std::stoi(*v); }
     else if (a == "--debug")  { o.debug = true; }
     else if (a == "--inspect") { o.inspect = true; }
+    else if (a == "--fullscreen") { o.fullscreen = true; }
+    else if (a == "--no-bridge") { o.no_bridge = true; }
   }
   return o;
 }
@@ -314,13 +322,88 @@ const char* FALLBACK_HTML =
   "<p>No app was provided. Run <code>hull dev</code> during development, "
   "or <code>hull build</code> to package your UI.</p></div></body></html>";
 
-void register_all(Dispatcher& d, const Options& opt) {
+// Window-mode context for bindings that need the native window. In serve mode
+// (browser dev) `view` stays null and the fullscreen bindings reply with an error.
+struct WindowCtx {
+  webview::webview* view = nullptr;
+  void* handle() {
+    if (!view) return nullptr;
+    auto w = view->window();
+    return w.ok() ? w.value() : nullptr;
+  }
+  // Run `fn` on the UI thread when a window exists (bindings can also be invoked
+  // from the trace/serve HTTP threads); otherwise run it inline.
+  void run_on_ui(std::function<void()> fn) {
+    if (view) view->dispatch(std::move(fn));
+    else fn();
+  }
+};
+
+// Links + window control. openExternal/openWindow also work in serve mode
+// (browser dev): they only need the OS shell, not the window.
+void register_window_bindings(Dispatcher& d, WindowCtx* wc, const Options& opt) {
+  d.on("openExternal", [wc](const json& a, Reply reply) {
+    const std::string url = (!a.empty() && a.at(0).is_string()) ? a.at(0).get<std::string>() : "";
+    if (!url_policy::allowed_external_url(url)) {
+      reply(json{{"ok", false},
+                 {"error", "openExternal: URL scheme not allowed (http, https, mailto, tel)"}});
+      return;
+    }
+    wc->run_on_ui([url, reply] {
+      const bool ok = shell::open_external(url);
+      reply(json{{"ok", ok}, {"url", url},
+                 {"error", ok ? json(nullptr) : json("failed to open URL with the OS handler")}});
+    });
+  });
+
+  d.on("openWindow", [wc, opt](const json& a, Reply reply) {
+    const std::string url = (!a.empty() && a.at(0).is_string()) ? a.at(0).get<std::string>() : "";
+    if (!url_policy::allowed_window_url(url)) {
+      reply(json{{"ok", false},
+                 {"error", "openWindow: only http(s) URLs can open in a new window"}});
+      return;
+    }
+    json o = (a.size() > 1 && a.at(1).is_object()) ? a.at(1) : json::object();
+    const std::string title = o.value("title", opt.title);
+    const int width = o.value("width", opt.width);
+    const int height = o.value("height", opt.height);
+    const bool ok = shell::open_window(url, title, width, height);
+    reply(json{{"ok", ok}, {"url", url},
+               {"error", ok ? json(nullptr) : json("failed to spawn the window process")}});
+  });
+
+  d.on("setFullscreen", [wc](const json& a, Reply reply) {
+    if (!wc->view) {
+      reply(json{{"ok", false}, {"error", "setFullscreen: no native window (browser dev mode)"}});
+      return;
+    }
+    const bool on = a.empty() || !a.at(0).is_boolean() || a.at(0).get<bool>();
+    wc->run_on_ui([wc, on, reply] {
+      const bool ok = window_ctl::set_fullscreen(wc->handle(), on);
+      // macOS animates the transition, so report the REQUESTED state on success.
+      reply(json{{"ok", ok}, {"fullscreen", ok ? on : window_ctl::is_fullscreen(wc->handle())}});
+    });
+  });
+
+  d.on("isFullscreen", [wc](const json&, Reply reply) {
+    if (!wc->view) {
+      reply(json{{"ok", false}, {"error", "isFullscreen: no native window (browser dev mode)"}});
+      return;
+    }
+    wc->run_on_ui([wc, reply] {
+      reply(json{{"ok", true}, {"fullscreen", window_ctl::is_fullscreen(wc->handle())}});
+    });
+  });
+}
+
+void register_all(Dispatcher& d, const Options& opt, WindowCtx* wc) {
   d.on("ping", [](const json& a, Reply reply) {
     reply(json{{"ok", true}, {"echo", a.empty() ? json(nullptr) : a.at(0)}});
   });
   d.on("appInfo", [opt](const json&, Reply reply) {
     reply(json{{"ok", true}, {"appId", opt.appId}, {"secure", secure::active()}});
   });
+  register_window_bindings(d, wc, opt);
   register_http_bindings(d);
   register_printer_bindings(d);
   register_storage_bindings(d);
@@ -341,9 +424,10 @@ int main(int argc, char** argv) {
   Options opt = parse_args(argc, argv);
   storage::set_app_name(opt.appId);
 
+  WindowCtx wc; // window handle attached in window mode; stays empty in serve mode
   Dispatcher d;
   if (opt.inspect) d.set_trace(true);
-  register_all(d, opt);
+  register_all(d, opt, &wc);
 
   // ---- Serve mode: headless HTTP/SSE bridge (browser dev mode) ----
   if (opt.serve_port) {
@@ -368,37 +452,59 @@ int main(int argc, char** argv) {
     window.set_title(opt.title);
     window.set_size(opt.width, opt.height, WEBVIEW_HINT_NONE);
     if (opt.icon) set_window_icon(window, *opt.icon);
+    wc.view = &window; // enables the fullscreen bindings + UI-thread dispatch
 
-    // Optional trace server: lets the inspector (a browser tab) observe this native
-    // app's bridge activity. Leaked intentionally — lives for the whole process.
-    BridgeServer* trace = opt.inspect_port ? new BridgeServer(d) : nullptr;
+    // --no-bridge: a plain web-view window for remote content (openWindow spawns
+    // these). No bindings, no emit sink, no link policy — the page is just a page.
+    BridgeServer* trace = nullptr;
+    if (!opt.no_bridge) {
+      // Optional trace server: lets the inspector (a browser tab) observe this native
+      // app's bridge activity. Leaked intentionally — lives for the whole process.
+      trace = opt.inspect_port ? new BridgeServer(d) : nullptr;
 
-    // emit -> push into the page; also mirror to the inspector trace server if on.
-    d.set_emit_sink([&window, trace](const std::string& event, const json& payload) {
-      const std::string js =
-          "if(window.__bridgeEmit){window.__bridgeEmit(" +
-          json(event).dump() + "," + json(payload.dump()).dump() + ");}";
-      window.dispatch([&window, js] { window.eval(js); });
-      if (trace) trace->broadcast(event, payload);
-    });
+      // emit -> push into the page; also mirror to the inspector trace server if on.
+      d.set_emit_sink([&window, trace](const std::string& event, const json& payload) {
+        const std::string js =
+            "if(window.__bridgeEmit){window.__bridgeEmit(" +
+            json(event).dump() + "," + json(payload.dump()).dump() + ");}";
+        window.dispatch([&window, js] { window.eval(js); });
+        if (trace) trace->broadcast(event, payload);
+      });
 
-    if (trace) {
-      const int port = *opt.inspect_port;
-      std::thread([trace, port] { trace->listen("127.0.0.1", port); }).detach();
-    }
+      if (trace) {
+        const int port = *opt.inspect_port;
+        std::thread([trace, port] { trace->listen("127.0.0.1", port); }).detach();
+      }
 
-    // bind every dispatcher handler onto window.<name>
-    for (const auto& name : d.names()) {
-      window.bind(
-          name,
-          [&d, &window, name](const std::string& id, const std::string& args_str, void*) {
-            json args;
-            try { args = json::parse(args_str); } catch (...) { args = json::array(); }
-            d.invoke(name, args, [&window, id](const json& res) {
-              window.resolve(id, 0, res.dump());
-            });
-          },
-          nullptr);
+      // bind every dispatcher handler onto window.<name>
+      for (const auto& name : d.names()) {
+        window.bind(
+            name,
+            [&d, &window, name](const std::string& id, const std::string& args_str, void*) {
+              json args;
+              try { args = json::parse(args_str); } catch (...) { args = json::array(); }
+              d.invoke(name, args, [&window, id](const json& res) {
+                window.resolve(id, 0, res.dump());
+              });
+            },
+            nullptr);
+      }
+
+      // Origin guard + link policy (runs at document start on every navigation):
+      // foreign origins get the whole bridge stripped; on the app's own origin,
+      // external links open in the OS default browser and data-hull-window opts
+      // into a new window. "file:" marks packaged apps; dev mode allows the
+      // scheme://host[:port] of the dev server URL.
+      std::string app_origin = "file:";
+      if (opt.url) {
+        const std::string& u = *opt.url;
+        const auto p = u.find("://");
+        if (p != std::string::npos) {
+          const auto end = u.find('/', p + 3);
+          app_origin = u.substr(0, end == std::string::npos ? u.size() : end);
+        }
+      }
+      window.init(link_script::build(app_origin, d.names()));
     }
 
     if (opt.url) {
@@ -427,6 +533,12 @@ int main(int argc, char** argv) {
       }
     } else {
       window.set_html(FALLBACK_HTML);
+    }
+
+    // --fullscreen: queued so it runs once the UI loop is live (macOS animates
+    // the transition; GTK applies it at map time).
+    if (opt.fullscreen) {
+      window.dispatch([&wc] { window_ctl::set_fullscreen(wc.handle(), true); });
     }
 
     window.run();

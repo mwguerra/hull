@@ -1,0 +1,55 @@
+<!doctype html>
+<!-- Self-driving e2e fixture for the host's link policy. Loaded by test/e2e/run.mjs
+     via `hull-host --app` with HULL_SHELL_DRYRUN=1; every bridge call it makes is
+     observed by the harness on the __trace SSE stream. -->
+<html>
+<head><meta charset="utf-8"><title>hull e2e</title></head>
+<body>
+  <h1>hull e2e fixture</h1>
+  <a id="ext" href="https://example.com/external">external link</a>
+  <a id="blank" href="https://example.com/blank" target="_blank">external _blank</a>
+  <a id="win" href="https://example.com/child" data-hull-window>opt-in child window</a>
+  <a id="mail" href="mailto:test@example.com">mail link</a>
+  <a id="hash" href="#local">in-page hash link</a>
+  <span id="wrapped-anchor"><a href="https://example.com/nested"><b id="nested">nested click target</b></a></span>
+  <svg width="10" height="10"><a href="https://example.com/svg" id="svg-link"><rect id="svg-rect" width="10" height="10"/></a></svg>
+  <map name="m"><area id="area" href="https://example.com/area" shape="default"></map>
+  <img usemap="#m" width="1" height="1" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">
+  <a id="middle" href="https://example.com/middle">middle-click target</a>
+  <script>
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    (async () => {
+      await sleep(300); // let the host finish wiring
+      try {
+        await window.ping("e2e:start");
+        // dispatchEvent instead of .click(): SVG elements have no click() in WebKit
+        const fire = (id, type = "click", button = 0) =>
+          document.getElementById(id).dispatchEvent(new MouseEvent(type, {
+            button, bubbles: true, cancelable: true, composed: true,
+          }));
+        for (const id of ["ext", "blank", "win", "mail", "hash", "nested", "svg-rect", "area"]) {
+          fire(id);
+          await sleep(60);
+        }
+        fire("middle", "auxclick", 1); // middle-click fires auxclick, not click
+        await sleep(60);
+        window.open("https://example.com/scripted");   // scripted open -> OS browser
+        window.open("javascript:alert(1)");            // must be swallowed
+        await sleep(250);
+        await window.ping(JSON.stringify({
+          stage: "links-done",
+          href: location.href,
+          hash: location.hash,
+        }));
+        // Finally: PROGRAMMATIC navigation to a foreign origin (the click policy
+        // can't stop this) — the origin guard must strip the bridge over there.
+        // The probe page reports back to the harness over HTTP.
+        await sleep(500);
+        location.href = "http://127.0.0.1:38217/probe.html";
+      } catch (e) {
+        try { await window.ping("e2e:error:" + (e && e.message)); } catch {}
+      }
+    })();
+  </script>
+</body>
+</html>

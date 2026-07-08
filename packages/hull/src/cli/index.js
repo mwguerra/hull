@@ -22,6 +22,8 @@ Usage: hull <command> [options]
 Options:
   -v, --verbose   Print per-step timings (every command also prints its total time)
   --debug         (dev/start) verbose host log on stderr + open the web-view devtools
+  --fullscreen    (dev/start) open the window in fullscreen for this run
+                  (persistent equivalent: "window": { "fullscreen": true } in .hullrc)
 
 Config is optional. Defaults come from package.json; override in .hullrc:
   { "appId": "com.you.app", "secure": false, "window": { "title": "App" } }

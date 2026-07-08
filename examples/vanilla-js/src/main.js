@@ -21,6 +21,9 @@ import {
   isNative,
   hasBridge,
   bridgeMode,
+  toggleFullscreen,
+  isFullscreen,
+  openExternal,
 } from "@mwguerra/hull/bridge";
 import logoUrl from "./assets/hull-logo.svg";
 
@@ -323,6 +326,26 @@ $("image-delete").addEventListener("click", async () => {
     clearImage();
     await loadFiles();
   } catch (e) { imageErr(e.message); }
+});
+
+// 9) Window & links — native fullscreen + the link policy. External links need no
+// JS at all (the host intercepts them); openExternal() is the programmatic path.
+const fsStatus = (msg) => { $("fs-status").textContent = msg; show($("fs-status")); };
+$("fs-toggle").addEventListener("click", async () => {
+  try {
+    const res = await toggleFullscreen();
+    fsStatus(res?.ok ? (res.fullscreen ? "fullscreen" : "windowed") : res?.error ?? "failed");
+  } catch (e) { fsStatus(e.message); }
+});
+$("fs-check").addEventListener("click", async () => {
+  try {
+    const res = await isFullscreen();
+    fsStatus(res?.ok ? `fullscreen: ${res.fullscreen}` : res?.error ?? "failed");
+  } catch (e) { fsStatus(e.message); }
+});
+$("open-api").addEventListener("click", (e) => {
+  e.preventDefault();
+  openExternal("https://github.com/mwguerra/hull").catch(console.error);
 });
 
 // init backend-backed sections (native host or browser dev mode)

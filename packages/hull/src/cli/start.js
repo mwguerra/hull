@@ -24,6 +24,7 @@ export async function start(cwd, args, { verbose } = {}) {
   };
 
   const debug = args.includes("--debug");
+  const fullscreenArgs = args.includes("--fullscreen") && !cfg.fullscreen ? ["--fullscreen"] : [];
 
   // macOS: the build produced a .app — launch it via `open` so LaunchServices shows the
   // bundle icon (Dock/Finder). `-W` waits until the app quits. With --debug we spawn the
@@ -36,12 +37,16 @@ export async function start(cwd, args, { verbose } = {}) {
     if (debug) {
       const inner = path.join(appPath, "Contents", "MacOS", binaryName(currentTarget(), cfg.secure));
       const appHtml = path.join(appPath, "Contents", "Resources", "app.html");
-      const child = spawn(inner, ["--app", appHtml, ...hostArgs(cfg), "--debug"], { stdio: "inherit" });
+      const child = spawn(inner, ["--app", appHtml, ...hostArgs(cfg), "--debug", ...fullscreenArgs],
+                          { stdio: "inherit" });
       child.on("error", (err) => { console.error(`hull start: ${explainSpawnError(err, inner) ?? err.message}`); process.exit(1); });
       child.on("exit", (code) => { if (code) console.error(exitAdvice("start", code)); process.exit(code ?? 0); });
       return;
     }
-    const child = spawn("open", ["-W", appPath], { stdio: "inherit" });
+    const child = spawn(
+      "open",
+      ["-W", appPath, ...(fullscreenArgs.length ? ["--args", ...fullscreenArgs] : [])],
+      { stdio: "inherit" });
     child.on("exit", (code) => process.exit(code ?? 0));
     return;
   }
@@ -61,7 +66,9 @@ export async function start(cwd, args, { verbose } = {}) {
 
   timer.total("hull start");
   const env = { ...process.env, ...hostEnv(cfg, { noSandbox: args.includes("--no-sandbox") }) };
-  const child = spawn(binary, ["--app", appHtml, ...hostArgs(cfg), ...(debug && !cfg.debug ? ["--debug"] : [])],
+  const child = spawn(binary,
+                      ["--app", appHtml, ...hostArgs(cfg),
+                       ...(debug && !cfg.debug ? ["--debug"] : []), ...fullscreenArgs],
                       { stdio: "inherit", env });
   child.on("error", (err) => { console.error(`hull start: ${explainSpawnError(err, binary) ?? err.message}`); process.exit(1); });
   child.on("exit", (code) => { if (code) console.error(exitAdvice("start", code)); process.exit(code ?? 0); });

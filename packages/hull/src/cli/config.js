@@ -9,7 +9,7 @@ const DEFAULT_ICON = path.resolve(
 // Package-level defaults. A project's .hullrc overrides these per key (the `window`
 // object is merged deeply); with no config file, all defaults apply.
 const DEFAULTS = {
-  window: { width: 1100, height: 760 },
+  window: { width: 1100, height: 760, fullscreen: false },
   secure: false,
   debug: false,
   outDir: "dist",
@@ -62,6 +62,7 @@ export async function loadConfig(cwd) {
     title: win.title ?? file.title ?? pkg.productName ?? bareName,
     width: Number(win.width),
     height: Number(win.height),
+    fullscreen: Boolean(win.fullscreen),
     icon,
     secure: Boolean(file.secure ?? DEFAULTS.secure),
     debug: Boolean(file.debug ?? DEFAULTS.debug),
@@ -97,6 +98,7 @@ export function hostArgs(cfg) {
     "--height", String(cfg.height),
   ];
   if (cfg.icon) args.push("--icon", cfg.icon);
+  if (cfg.fullscreen) args.push("--fullscreen");
   if (cfg.debug) args.push("--debug");
   return args;
 }

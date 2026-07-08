@@ -85,7 +85,8 @@ endif()
 
 # --- Platform: keychain + printing + sockets + (Gdiplus for the window icon) ---
 if (WIN32)
-  target_link_libraries(hull-host PRIVATE Advapi32 Winspool Crypt32 ws2_32 Gdiplus Gdi32 User32)
+  # Shell32: ShellExecuteW (openExternal — links in the OS default browser)
+  target_link_libraries(hull-host PRIVATE Advapi32 Winspool Crypt32 ws2_32 Gdiplus Gdi32 User32 Shell32)
 elseif (APPLE)
   find_library(SECURITY_FRAMEWORK Security)
   find_library(CF_FRAMEWORK CoreFoundation)
@@ -95,7 +96,7 @@ else() # Linux
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(SECRET REQUIRED libsecret-1)
   pkg_check_modules(CUPS REQUIRED cups)
-  pkg_check_modules(GLIB REQUIRED glib-2.0)   # g_set_prgname: window app-id -> desktop icon
+  pkg_check_modules(GLIB REQUIRED glib-2.0 gio-2.0)   # g_set_prgname (desktop icon) + g_app_info_launch_default_for_uri (openExternal)
   target_include_directories(hull-host PRIVATE ${SECRET_INCLUDE_DIRS} ${CUPS_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS})
   target_link_libraries(hull-host PRIVATE ${SECRET_LIBRARIES} ${CUPS_LIBRARIES} ${GLIB_LIBRARIES})
 endif()

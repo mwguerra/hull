@@ -467,6 +467,9 @@ All from `@mwguerra/hull/bridge`:
 | `printReceipt(printer, text)` / `printNetwork(host, port, text)` | raw **ESC/POS** for thermal receipt printers (spooler / TCP port-9100) |
 | `db.query` / `db.get` / `db.exec` / `db.batch` / `db.migrate` | embedded SQLite, parameterized, per-user storage |
 | `files.write` / `read` / `readText` / `list` / `remove` | file/upload storage in the per-user dir (through the secure layer) |
+| `setFullscreen(on)` / `isFullscreen()` / `toggleFullscreen()` | native window fullscreen; DOM Fullscreen fallback in a browser |
+| `openExternal(url)` | open `http/https/mailto/tel` with the **OS default browser/handler** — the default for every external link |
+| `openWindow(url, {title,width,height})` | opt-in: open web content in a **new Hull window** (plain web view, no bridge) |
 | `appInfo()` | `{ ok, appId, secure }` — `secure` true on a crypto build |
 | `bridge.on(event, fn)` | subscribe to C++ → UI push events (e.g. `settings:changed`); returns an unsubscribe fn |
 | `hasBridge()` / `isNative()` / `bridgeMode()` | `hasBridge` = reachable (native or browser dev); `isNative` = native web view; `bridgeMode` = `"native"`/`"http"`/`"none"` |
@@ -520,6 +523,7 @@ package defaults. Lookup order: `.hullrc` → `.hullrc.json` → `hull.config.js
 | `appId` | `com.hull.<pkg name>` | namespaces the store, DB, files, and keychain entries so multiple Hull apps never collide |
 | `window.title` | pkg `productName`/`name` | native window title |
 | `window.width` / `window.height` | `1100` / `760` | window size |
+| `window.fullscreen` | `false` | open in fullscreen (dev, start, and packaged apps); per-run: `hull dev/start --fullscreen` |
 | `window.icon` (or top-level `icon`) | bundled Hull logo | PNG/ICO for the window/app icon; set at runtime on Windows (GDI+), via the app bundle on macOS/Linux; SVG is not a valid native icon |
 | `secure` | `false` | run the crypto host build (`hull-host-secure`): AES files/settings + SQLCipher DB |
 | `debug` | `false` | open the web-view dev tools |

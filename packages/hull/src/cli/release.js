@@ -49,13 +49,14 @@ export function copyHostFiles(hostDir, destDir, binName) {
 // Write a double-clickable launcher appropriate to the TARGET os, invoking `binName`.
 export function writeLauncher(destDir, key, cfg, binName, iconName) {
   const os = key.split("-")[0];
+  const fullscreen = cfg.fullscreen ? " --fullscreen" : "";
   if (os === "win32") {
     const name = `${sanitize(cfg.title)}.cmd`;
     const icon = iconName ? ` --icon "%~dp0${iconName}"` : "";
     const body =
       `@echo off\r\n` +
       `"%~dp0${binName}" --app "%~dp0app.html" --title "${cfg.title}" ` +
-      `--app-id "${cfg.appId}" --width ${cfg.width} --height ${cfg.height}${icon}\r\n`;
+      `--app-id "${cfg.appId}" --width ${cfg.width} --height ${cfg.height}${fullscreen}${icon}\r\n`;
     fs.writeFileSync(path.join(destDir, name), body);
     return { name, exec: false };
   }
@@ -74,7 +75,7 @@ export function writeLauncher(destDir, key, cfg, binName, iconName) {
     `DIR="$(cd "$(dirname "$0")" && pwd)"\n` +
     sandbox +
     `"$DIR/${binName}" --app "$DIR/app.html" --title "${cfg.title}" ` +
-    `--app-id "${cfg.appId}" --width ${cfg.width} --height ${cfg.height}${icon}\n`;
+    `--app-id "${cfg.appId}" --width ${cfg.width} --height ${cfg.height}${fullscreen}${icon}\n`;
   fs.writeFileSync(path.join(destDir, name), body, { mode: 0o755 });
   return { name, exec: true };
 }
@@ -119,7 +120,8 @@ export function writeMacApp(bundleDir, cfg, hostDir, binName, builtHtml, iconPat
     `DIR="$(cd "$(dirname "$0")" && pwd)"\n` +
     `RES="$DIR/../Resources"\n` +
     `exec "$DIR/${binName}" --app "$RES/app.html" --title "${cfg.title}" ` +
-    `--app-id "${cfg.appId}" --width ${cfg.width} --height ${cfg.height}\n`;
+    `--app-id "${cfg.appId}" --width ${cfg.width} --height ${cfg.height}` +
+    `${cfg.fullscreen ? " --fullscreen" : ""} "$@"\n`;   // "$@": open ... --args <extra host flags>
   fs.writeFileSync(path.join(macosDir, execName), script, { mode: 0o755 });
   try { fs.chmodSync(path.join(macosDir, execName), 0o755); } catch { /* best effort */ }
 

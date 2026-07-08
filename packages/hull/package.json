@@ -6,6 +6,10 @@
   "bin": {
     "hull": "bin/hull.js"
   },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:e2e": "node test/e2e/run.mjs"
+  },
   "exports": {
     "./bridge": "./src/bridge/index.js",
     "./vue": "./src/vue/index.js",

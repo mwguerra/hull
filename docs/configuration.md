@@ -13,6 +13,7 @@ you set are overridden — everything else keeps its default.
     "title": "Notes",               // default: package.json productName, else name
     "width": 1100,                  // default: 1100
     "height": 760,                  // default: 760
+    "fullscreen": false,            // open in fullscreen (default: false)
     "icon": "build/app-icon.png"    // window/app icon (default: bundled Hull logo)
   },
   "debug": false,                   // open dev tools (default: false)
@@ -40,6 +41,7 @@ every key uses its default (title/appId derived from `package.json`).
 | `secure` | `false` | launch the crypto host build (`hull-host-secure`); see [security.md](security.md) |
 | `window.title` | pkg `productName`/`name` | native window title |
 | `window.width` / `window.height` | `1100` / `760` | window size |
+| `window.fullscreen` | `false` | open the window in fullscreen; see [The `window.fullscreen` key](#the-windowfullscreen-key) |
 | `window.icon` (or `icon`) | bundled Hull logo | window/app icon; see [The `window.icon` key](#the-windowicon-key) |
 | `debug` | `false` | open the web-view dev tools |
 | `outDir` | `dist` | Vite UI build dir |
@@ -79,6 +81,25 @@ binary when you `hull build`, so packaged apps stay self-contained.
   running the raw binary shows a generic icon — build the `.app` to see it.
 
 SVGs aren't valid native icons; use a PNG.
+
+## The `window.fullscreen` key
+
+`"window": { "fullscreen": true }` opens the app in **native fullscreen** on every
+launch — `hull dev`, `hull start`, and packaged apps (the flag is baked into the
+generated launchers and the macOS `.app`). Per-run equivalent without touching
+config: `hull dev --fullscreen` / `hull start --fullscreen`.
+
+The app can also enter/leave fullscreen at runtime from JS:
+
+```js
+import { setFullscreen, isFullscreen, toggleFullscreen } from "@mwguerra/hull/bridge";
+await setFullscreen(true);                    // and later: setFullscreen(false)
+const { fullscreen } = await isFullscreen();
+```
+
+Platform notes: Windows uses borderless fullscreen on the window's monitor; macOS
+uses the native fullscreen Space (animated); Linux uses `gtk_window_fullscreen`.
+See [features.md](features.md#9--window-control--links).
 
 ## The `linux.sandbox` key
 

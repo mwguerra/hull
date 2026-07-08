@@ -23,6 +23,47 @@ export const ping = (text) => call("ping", text);
 // { ok, appId, secure }  — `secure` is true when running a crypto-enabled host build.
 export const appInfo = () => call("appInfo");
 
+// --- Window control & links ---
+// In the native host these drive the real window / OS shell. In the browser
+// (dev mode or plain web) they degrade gracefully: fullscreen uses the DOM
+// Fullscreen API (needs a user gesture), links open a new tab — which IS the
+// user's default browser.
+
+// Enter/leave native fullscreen. Resolves { ok, fullscreen }.
+export const setFullscreen = (on = true) => {
+  if (isNative()) return call("setFullscreen", Boolean(on));
+  const p = on
+    ? document.documentElement.requestFullscreen?.()
+    : (document.fullscreenElement ? document.exitFullscreen?.() : undefined);
+  return Promise.resolve(p)
+    .then(() => ({ ok: true, fullscreen: Boolean(on) }))
+    .catch((e) => ({ ok: false, error: String(e?.message ?? e) }));
+};
+// Resolves { ok, fullscreen }.
+export const isFullscreen = () => {
+  if (isNative()) return call("isFullscreen");
+  return Promise.resolve({ ok: true, fullscreen: Boolean(document.fullscreenElement) });
+};
+export const toggleFullscreen = async () => {
+  const cur = await isFullscreen();
+  return setFullscreen(!cur.fullscreen);
+};
+
+// Open a URL with the OS default handler (http/https/mailto/tel — the default
+// for every external link the app renders; see the link policy in features.md).
+export const openExternal = (url) => {
+  if (isNative()) return call("openExternal", String(url));
+  window.open(String(url), "_blank", "noopener");
+  return Promise.resolve({ ok: true, url: String(url) });
+};
+// Opt-in: open web content (http/https) in a NEW Hull window — a plain web view
+// with NO bridge bindings. Same as clicking <a data-hull-window href="...">.
+export const openWindow = (url, options = {}) => {
+  if (isNative()) return call("openWindow", String(url), options);
+  window.open(String(url), "_blank", "noopener");
+  return Promise.resolve({ ok: true, url: String(url) });
+};
+
 // --- HTTP (TLS, on a C++ worker thread; auth token injected from the keychain) ---
 export const httpPost = (url, body) => call("httpPost", url, body);
 export const httpGet = (url) => call("httpGet", url);

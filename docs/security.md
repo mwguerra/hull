@@ -30,6 +30,27 @@ await httpPost("https://api.example.com/x", { a: 1 });
 - On some Linux setups you may need to point the host at a CA bundle
   (`/etc/ssl/certs/ca-certificates.crt`) — an `eject`-level change.
 
+## Navigation & links — the bridge stays home
+
+The native bindings are only meant for **your app's own code**, so the host
+enforces two things at document start of every navigation (injected before any
+page script runs):
+
+- **Origin guard** — any document that is not the app's own origin (`file:` for
+  packaged apps; the dev-server origin under `hull dev`) gets every binding, the
+  webview RPC object, and the event hook **stripped**. Even if a page navigates
+  itself to a remote site (`location.href`, form submit, redirect), that site
+  sees a plain web page — no database, keychain, files, or HTTP bindings.
+- **Link policy** — external links open in the OS default browser instead of
+  navigating the app window (see
+  [features.md](features.md#9--window-control--links)); `data-hull-window`
+  child windows are separate `--no-bridge` processes with **no bindings at all**;
+  `openExternal`/`openWindow` accept only `http/https(/mailto/tel)` and fail
+  closed on `file:`, `javascript:`, `data:` and custom schemes.
+
+Both behaviors are exercised by the e2e suite (`npm run test:e2e`), including a
+programmatic navigation to a foreign origin that asserts nothing leaks.
+
 ## Encryption at rest — a build-time layer
 
 At-rest crypto is a **layer** (`secure::`), chosen at build time. Nothing in the

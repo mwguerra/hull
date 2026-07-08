@@ -151,11 +151,12 @@ export async function dev(cwd, args, { verbose } = {}) {
   preflight(binary);
   // --inspect enables the trace; --inspect-port runs the trace server for the inspector.
   const debug = args.includes("--debug") && !cfg.debug;
+  const fullscreen = args.includes("--fullscreen") && !cfg.fullscreen;
   const env = { ...process.env, ...hostEnv(cfg, { noSandbox: args.includes("--no-sandbox") }) };
   const child = spawn(
     binary,
     ["--url", url, "--inspect", "--inspect-port", String(inspectPort), ...hostArgs(cfg),
-     ...(debug ? ["--debug"] : [])],
+     ...(debug ? ["--debug"] : []), ...(fullscreen ? ["--fullscreen"] : [])],
     { stdio: "inherit", env });
   child.on("error", (err) => { console.error(`hull dev: ${explainSpawnError(err, binary) ?? err.message}`); process.exit(1); });
   timer.step("native window launched");
