@@ -15,6 +15,7 @@ web-view host. `npm install` and go — no compiler, no Electron.
 - [Native code](native-code.md) — `eject` and writing your own C++ bindings
 - [Security](security.md) — secrets, TLS, encryption at rest, storage locations
 - [Distribution](distribution.md) — how prebuilt hosts are built and published; shipping your app
+- [Project analysis](project-analysis.md) — deep code-level assessment: architecture, strengths, prioritized risks, roadmap
 
 ## Examples
 
