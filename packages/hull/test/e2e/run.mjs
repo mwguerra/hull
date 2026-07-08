@@ -86,9 +86,30 @@ async function waitFor(predicate, timeoutMs, what) {
 // PROGRAMMATICALLY navigates the bridged window here; the origin guard must have
 // stripped every binding, and probe.html reports what it sees back to /report.
 const PROBE_PORT = 38217;
+const BLOB_BYTES = 100000;
 let probeReport = null;
 const probeServer = http.createServer((req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PROBE_PORT}`);
+  if (url.pathname === "/json") { // httpRequest e2e endpoint
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ hello: "world", header: req.headers["x-hull-test"] ?? null }));
+    return;
+  }
+  if (url.pathname === "/echo" && req.method === "POST") {
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ echoed: JSON.parse(body || "null"), method: req.method }));
+    });
+    return;
+  }
+  if (url.pathname === "/blob") { // httpDownload e2e endpoint
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Content-Length", String(BLOB_BYTES));
+    res.end(Buffer.alloc(BLOB_BYTES, 7));
+    return;
+  }
   if (url.pathname === "/probe.html") {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.end(`<!doctype html><title>probe</title><script>
@@ -123,7 +144,8 @@ const base = `http://127.0.0.1:${port}`;
 const host = spawn(
   binary,
   ["--app", FIXTURE, "--inspect", "--inspect-port", String(port),
-   "--title", "hull-e2e", "--app-id", "com.hull.e2e", "--width", "480", "--height", "360"],
+   "--title", "hull-e2e", "--app-id", "com.hull.e2e", "--width", "480", "--height", "360",
+   "--single-instance"],
   { stdio: ["ignore", "inherit", "inherit"], env: { ...process.env, HULL_SHELL_DRYRUN: "1" } },
 );
 host.on("error", (e) => { console.error(`FAIL host spawn: ${e.message}`); process.exit(1); });
@@ -193,6 +215,108 @@ try {
     check(leaked.length === 0,
           `foreign origin sees NO bridge (leaked: ${leaked.map(([k, v]) => `${k}=${v}`).join(", ") || "none"})`);
   }
+
+  // --- window control (real window ops) ---
+  check((await invoke(base, "windowMaximize", [true])).ok === true, "windowMaximize(true) ok");
+  await sleep(700);
+  check((await invoke(base, "windowIsMaximized")).maximized === true, "window IS maximized");
+  check((await invoke(base, "windowMaximize", [false])).ok === true, "windowMaximize(false) ok");
+  await sleep(700);
+  check((await invoke(base, "windowIsMaximized")).maximized === false, "window restored");
+  const bounds = await invoke(base, "windowGetBounds");
+  check(bounds.ok === true && bounds.width > 0 && bounds.height > 0 &&
+        bounds.maximized === false, `windowGetBounds reports real bounds (${bounds.width}x${bounds.height})`);
+  check((await invoke(base, "windowSetSize", [520, 410])).ok === true, "windowSetSize ok");
+  check((await invoke(base, "windowCenter")).ok === true, "windowCenter ok");
+  check((await invoke(base, "windowSetAlwaysOnTop", [true])).ok === true, "always-on-top on");
+  check((await invoke(base, "windowSetAlwaysOnTop", [false])).ok === true, "always-on-top off");
+
+  // --- clipboard (real pasteboard; original content restored afterwards) ---
+  const clipBefore = await invoke(base, "clipboardReadText");
+  check((await invoke(base, "clipboardWriteText", ["hull-e2e-clipboard"])).ok === true,
+        "clipboardWriteText ok");
+  const clipNow = await invoke(base, "clipboardReadText");
+  check(clipNow.ok === true && clipNow.text === "hull-e2e-clipboard", "clipboard roundtrip");
+  await invoke(base, "clipboardWriteText", [clipBefore?.text ?? ""]); // be a good citizen
+
+  // --- dialogs (dry-run canned results — modality can't be e2e'd headlessly) ---
+  const dOpen = await invoke(base, "dialogOpen", [{ title: "pick" }]);
+  check(dOpen.ok === true && dOpen.canceled === false && dOpen.paths.length === 1,
+        "dialogOpen replies with a path");
+  const dSave = await invoke(base, "dialogSave", [{ defaultName: "out.txt" }]);
+  check(dSave.ok === true && dSave.path === "/dry-run/out.txt", "dialogSave replies with a path");
+  const dMsg = await invoke(base, "dialogMessage",
+                            [{ message: "hi", buttons: ["A", "B"], defaultId: 1 }]);
+  check(dMsg.ok === true && dMsg.button === 1, "dialogMessage replies with the button index");
+
+  // --- shell path ops (dry-run) ---
+  check((await invoke(base, "openPath", ["/tmp"])).ok === true, "openPath ok");
+  check((await invoke(base, "revealPath", ["/tmp"])).ok === true, "revealPath ok");
+  check((await invoke(base, "trashPath", ["/tmp/nonexistent-hull-e2e"])).ok === true,
+        "trashPath ok (dry-run)");
+
+  // --- tray (real status item on macOS/Windows; unsupported reply on Linux) ---
+  const trayRes = await invoke(base, "traySet",
+                               [{ tooltip: "hull-e2e", menu: [{ id: "a", label: "Item A" }] }]);
+  if (process.platform === "linux") {
+    check(trayRes.ok === false, "traySet reports unsupported on Linux");
+  } else {
+    check(trayRes.ok === true, "traySet creates the status item");
+    check((await invoke(base, "trayRemove")).ok === true, "trayRemove ok");
+  }
+
+  // --- HTTP upgrade (against the local probe server — no external network) ---
+  const hGet = await invoke(base, "httpRequest",
+      [{ url: `http://127.0.0.1:${PROBE_PORT}/json`, auth: false,
+         headers: { "X-Hull-Test": "yes" } }]);
+  check(hGet.ok === true && hGet.status === 200 && hGet.body?.hello === "world",
+        "httpRequest GET returns parsed JSON");
+  check(hGet.body?.header === "yes", "httpRequest sends custom headers");
+  const hPost = await invoke(base, "httpRequest",
+      [{ url: `http://127.0.0.1:${PROBE_PORT}/echo`, method: "POST", auth: false,
+         body: { n: 42 } }]);
+  check(hPost.ok === true && hPost.body?.echoed?.n === 42 && hPost.body?.method === "POST",
+        "httpRequest POST round-trips a JSON body");
+
+  const os = await import("node:os");
+  const fsMod = await import("node:fs");
+  const dlPath = path.join(os.tmpdir(), `hull-e2e-download-${process.pid}.bin`);
+  const dl = await invoke(base, "httpDownload",
+      [{ url: `http://127.0.0.1:${PROBE_PORT}/blob`, path: dlPath, auth: false }]);
+  check(dl.ok === true && dl.bytes === BLOB_BYTES &&
+        fsMod.statSync(dlPath).size === BLOB_BYTES, "httpDownload streams the file to disk");
+  fsMod.rmSync(dlPath, { force: true });
+  check(traces.some((t) => t.type === "event" && t.event === "http:download"),
+        "http:download progress event emitted");
+
+  // --- DB backup (real VACUUM INTO) + path file IO ---
+  await invoke(base, "dbExec", ["CREATE TABLE IF NOT EXISTS e2e (id INTEGER PRIMARY KEY)"]);
+  const bakPath = path.join(os.tmpdir(), `hull-e2e-backup-${Date.now()}.db`);
+  const bak = await invoke(base, "dbBackup", [bakPath]);
+  check(bak.ok === true && fsMod.existsSync(bakPath), "dbBackup writes a snapshot");
+  fsMod.rmSync(bakPath, { force: true });
+
+  const ioPath = path.join(os.tmpdir(), `hull-e2e-io-${process.pid}.txt`);
+  const b64 = Buffer.from("path io roundtrip").toString("base64");
+  check((await invoke(base, "fileWriteAt", [ioPath, b64])).ok === true, "fileWriteAt ok");
+  const readBack = await invoke(base, "fileReadAt", [ioPath]);
+  check(readBack.ok === true &&
+        Buffer.from(readBack.data, "base64").toString() === "path io roundtrip",
+        "fileReadAt roundtrip");
+  fsMod.rmSync(ioPath, { force: true });
+
+  // --- single instance: a second launch must notify the first and exit ---
+  const second = spawn(binary,
+      ["--app", FIXTURE, "--app-id", "com.hull.e2e", "--single-instance",
+       "--title", "hull-e2e-2"],
+      { env: { ...process.env, HULL_SHELL_DRYRUN: "1" } });
+  const secondExit = await new Promise((res) => {
+    const t = setTimeout(() => { second.kill("SIGKILL"); res("timeout"); }, 8000);
+    second.on("exit", (code) => { clearTimeout(t); res(code); });
+  });
+  check(secondExit === 0, `second instance exits cleanly (got ${secondExit})`);
+  await waitFor(() => traces.some((t) => t.type === "event" && t.event === "app:second-instance"),
+                5000, "app:second-instance event");
 
   // --- fullscreen (real native window; macOS animates, hence the sleeps) ---
   const fs0 = await invoke(base, "isFullscreen");

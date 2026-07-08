@@ -63,6 +63,14 @@ export async function loadConfig(cwd) {
     width: Number(win.width),
     height: Number(win.height),
     fullscreen: Boolean(win.fullscreen),
+    minWidth: Number(win.minWidth) || 0,
+    minHeight: Number(win.minHeight) || 0,
+    maxWidth: Number(win.maxWidth) || 0,
+    maxHeight: Number(win.maxHeight) || 0,
+    alwaysOnTop: Boolean(win.alwaysOnTop),
+    center: Boolean(win.center),
+    rememberState: Boolean(win.rememberState),
+    singleInstance: Boolean(file.singleInstance),
     icon,
     secure: Boolean(file.secure ?? DEFAULTS.secure),
     debug: Boolean(file.debug ?? DEFAULTS.debug),
@@ -70,6 +78,7 @@ export async function loadConfig(cwd) {
     license,
     publisher,
     description,
+    sign: file.sign ?? null, // optional code-signing config (see src/cli/sign.js)
     outDir: file.outDir ?? DEFAULTS.outDir,
     releaseDir: file.releaseDir ?? DEFAULTS.releaseDir,
   };
@@ -89,6 +98,23 @@ export function hostEnv(cfg, { noSandbox = false } = {}) {
   return env;
 }
 
+// Window/behavior flags shared by hostArgs (dev/start spawns) AND the generated
+// launchers (release.js) — one list so a new flag can't miss a launch path.
+// Values are numbers or bare flags only, so joining with spaces is shell-safe.
+export function windowFlags(cfg) {
+  const flags = [];
+  if (cfg.fullscreen) flags.push("--fullscreen");
+  if (cfg.minWidth) flags.push("--min-width", String(cfg.minWidth));
+  if (cfg.minHeight) flags.push("--min-height", String(cfg.minHeight));
+  if (cfg.maxWidth) flags.push("--max-width", String(cfg.maxWidth));
+  if (cfg.maxHeight) flags.push("--max-height", String(cfg.maxHeight));
+  if (cfg.alwaysOnTop) flags.push("--always-on-top");
+  if (cfg.center) flags.push("--center");
+  if (cfg.rememberState) flags.push("--remember-state");
+  if (cfg.singleInstance) flags.push("--single-instance");
+  return flags;
+}
+
 // Common host flags derived from config.
 export function hostArgs(cfg) {
   const args = [
@@ -98,7 +124,7 @@ export function hostArgs(cfg) {
     "--height", String(cfg.height),
   ];
   if (cfg.icon) args.push("--icon", cfg.icon);
-  if (cfg.fullscreen) args.push("--fullscreen");
+  args.push(...windowFlags(cfg));
   if (cfg.debug) args.push("--debug");
   return args;
 }

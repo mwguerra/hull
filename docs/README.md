@@ -19,7 +19,7 @@ web-view host. `npm install` and go — no compiler, no Electron.
 
 ## Examples
 
-Three runnable apps, each exercising **all** features (bridge, settings + events, credentials, HTTP, printing, SQLite, files):
+Three runnable apps, each exercising all **core** features (bridge, settings + events, credentials, HTTP, printing, SQLite, files):
 
 | Example | Stack | Path |
 |---------|-------|------|

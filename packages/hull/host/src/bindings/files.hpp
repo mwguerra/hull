@@ -3,6 +3,7 @@
 // + unit-tested); these run it on a worker thread and speak base64 over the bridge.
 #include <thread>
 #include <string>
+#include <fstream>
 #include <filesystem>
 #include <nlohmann/json.hpp>
 #include "dispatcher.hpp"
@@ -42,6 +43,37 @@ inline void register_files_bindings(Dispatcher& d) {
           arr.push_back({{"name", e.path().filename().string()}, {"size", (int64_t)e.file_size()}});
         }
         reply(json{{"ok", true}, {"files", arr}});
+      } catch (const std::exception& e) { reply(json{{"ok", false}, {"error", e.what()}}); }
+    }).detach();
+  });
+
+  // Path-based IO for files the USER picked via the native dialogs (arbitrary
+  // absolute paths, plain bytes — NOT the managed per-user store above, and not
+  // run through the secure layer: the user chose where these live).
+  // fileReadAt(path) -> { ok, data: base64 }
+  d.on("fileReadAt", [](const json& a, Reply reply) {
+    std::thread([a, reply]() {
+      try {
+        const std::string path = a.at(0).get<std::string>();
+        std::ifstream in(fs::path(path), std::ios::binary);
+        if (!in) { reply(json{{"ok", false}, {"error", "cannot open: " + path}}); return; }
+        std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        reply(json{{"ok", true}, {"data", appfiles::b64encode(bytes)}});
+      } catch (const std::exception& e) { reply(json{{"ok", false}, {"error", e.what()}}); }
+    }).detach();
+  });
+
+  // fileWriteAt(path, base64) -> { ok }
+  d.on("fileWriteAt", [](const json& a, Reply reply) {
+    std::thread([a, reply]() {
+      try {
+        const std::string path = a.at(0).get<std::string>();
+        const std::string bytes = appfiles::b64decode(a.at(1).get<std::string>());
+        std::ofstream out(fs::path(path), std::ios::binary | std::ios::trunc);
+        if (!out) { reply(json{{"ok", false}, {"error", "cannot write: " + path}}); return; }
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        out.close();
+        reply(json{{"ok", !out.fail()}});
       } catch (const std::exception& e) { reply(json{{"ok", false}, {"error", e.what()}}); }
     }).detach();
   });

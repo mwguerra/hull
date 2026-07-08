@@ -45,7 +45,8 @@ release/
   MacOS/<host + launcher>, Resources/<app.html + icon.icns>}`, archived as `.tar.gz` and
   double-clickable in Finder with its icon. The host links Homebrew OpenSSL by path, so
   the `.app` runs on machines with those libs (the build machine); bundling/relinking the
-  dylibs + code-signing & notarizing for other Macs is a later step (see Signing).
+  dylibs for other Macs is still a later step. Code-signing & notarizing the `.app`/`.dmg`
+  is available now via the `.hullrc` `sign` config (see Signing).
 - **Window icon**: if `.hullrc` sets `window.icon` (or top-level `icon`), the icon is copied into the bundle
   as `icon.<ext>` and the launcher passes `--icon`. With no icon set, the host falls
   back to the bundled Hull logo (no extra file shipped).
@@ -73,10 +74,11 @@ hull build && hull installer        # -> release/<version>/<App>-<version>-<key>
 | Windows | `.exe` (per-user install to `{localappdata}\Programs`, Start-Menu + Desktop shortcuts w/ icon, uninstaller) | [Inno Setup](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`) | run the `.exe` |
 
 Each installer is built on its own OS (the packaging tools are OS-native), like the host
-binaries. The installers are **unsigned** — fine for your own machines/testing; for public
-distribution add code-signing per platform (see Signing below): macOS apps need
-signing **+ notarization** (and the `.app`'s Homebrew OpenSSL dylibs bundled/relinked),
-Windows installers need Authenticode to avoid SmartScreen warnings.
+binaries. The installers are **unsigned by default** — fine for your own machines/testing;
+for public distribution turn on the opt-in `.hullrc` `sign` config (see Signing below):
+macOS apps need signing **+ notarization** (and the `.app`'s Homebrew OpenSSL dylibs
+bundled/relinked — still a manual step), Windows installers need Authenticode to avoid
+SmartScreen warnings.
 
 **Store metadata.** The `.deb` ships an AppStream MetaInfo file
 (`/usr/share/metainfo/<appId>.metainfo.xml`) so GNOME Software / App Center shows the
@@ -114,9 +116,39 @@ a public release is CI (below), where each OS runner builds its bundle.
 
 ### Signing
 
-- **Windows**: Authenticode-sign `hull-host.exe` so SmartScreen stays quiet.
-- **macOS**: code-sign + notarize.
-- **Linux**: no signing requirement.
+Code-signing is **opt-in `.hullrc` config** — every step is a no-op when unset,
+so unsigned builds keep working untouched:
+
+```jsonc
+{
+  "sign": {
+    "mac": {
+      "identity": "Developer ID Application: You (TEAMID)",
+      "notarize": { "appleId": "you@example.com", "teamId": "TEAMID",
+                    "passwordEnv": "NOTARY_PASSWORD" }   // app-specific password
+    },
+    "windows": { "certFile": "certs/app.pfx", "passwordEnv": "WIN_CERT_PASSWORD",
+                 "timestampUrl": "http://timestamp.digicert.com" }
+  }
+}
+```
+
+- **macOS** — `mac.identity` runs `codesign --deep --options runtime` on the
+  `.app` (at `hull build`) and on the `.dmg` (at `hull installer`).
+  `mac.notarize` then submits via `xcrun notarytool submit --wait` and staples
+  the ticket. Needs Xcode command-line tools; notarization blocks until Apple
+  answers (minutes).
+- **Windows** — `windows.certFile` Authenticode-signs the installer `.exe` with
+  `signtool` (SHA-256, RFC-3161 timestamp; default timestamp server
+  `timestamp.digicert.com`) so SmartScreen stays quiet.
+- **Linux** — no signing requirement (provenance comes from a signed APT repo or
+  a Flatpak/Snap store, not the artifact).
+
+**Secrets come from env vars** named in the config (`passwordEnv`) — never from
+the file itself, so `.hullrc` is safe to commit. Signing tools must run on their
+own OS (codesign/xcrun on macOS, signtool on Windows); if signing is configured
+but the tool or env var is missing, the build **fails loudly** rather than
+shipping an artifact you believe is signed.
 
 ---
 

@@ -20,11 +20,13 @@
 #include <string>
 
 #include "notify_text.hpp"
+#include "emit_hook.hpp" // "notification:clicked" event
 #include "shell.hpp" // dryrun(), widen_utf8 (Windows), spawn_detached (macOS fallback)
 
 #if defined(_WIN32)
 #include <windows.h>
 #include <shellapi.h>
+#include "tray.hpp" // shared tray icon + callback subclass (balloon clicks)
 #elif defined(__APPLE__)
 #include <objc/runtime.h>
 #include <objc/message.h>
@@ -45,16 +47,22 @@ inline id nsstr(const std::string& s) {
 
 // NSUserNotificationCenter suppresses banners from the FRONTMOST app unless a
 // delegate says otherwise — and "user clicks a button in the app" is exactly
-// the frontmost case. Build a minimal delegate at runtime that always presents.
+// the frontmost case. The runtime-built delegate always presents, and turns
+// notification activation into the "notification:clicked" event.
 inline id presenting_delegate() {
   static id inst = nullptr;
   if (inst) return inst;
   Class cls = objc_allocateClassPair(objc_getClass("NSObject"), "HullNotificationDelegate", 0);
   if (cls) {
-    const auto imp = reinterpret_cast<IMP>(
+    const auto present = reinterpret_cast<IMP>(
         +[](id, SEL, id, id) -> signed char { return 1; }); // BOOL YES
     class_addMethod(cls, sel_registerName("userNotificationCenter:shouldPresentNotification:"),
-                    imp, "c@:@@");
+                    present, "c@:@@");
+    const auto activated = reinterpret_cast<IMP>(+[](id, SEL, id, id) {
+      hooks::emit("notification:clicked", nlohmann::json::object());
+    });
+    class_addMethod(cls, sel_registerName("userNotificationCenter:didActivateNotification:"),
+                    activated, "v@:@@");
     objc_registerClassPair(cls);
     inst = reinterpret_cast<id (*)(id, SEL)>(objc_msgSend)(
         reinterpret_cast<id>(cls), sel_registerName("new"));
@@ -78,29 +86,18 @@ inline bool show(void* hwnd, const std::string& title, const std::string& body,
   (void)icon_path;
   HWND owner = static_cast<HWND>(hwnd);
   if (!owner) return false; // balloon icons need a window to attach to
-  static bool added = false;
+  // The tray module owns the icon (shared with traySet) and routes its
+  // callbacks — including NIN_BALLOONUSERCLICK -> "notification:clicked".
+  if (!tray::ensure_icon(owner, app_name)) return false;
   NOTIFYICONDATAW nid{};
   nid.cbSize = sizeof(nid);
   nid.hWnd = owner;
-  nid.uID = 0x48554C; // "HUL"
+  nid.uID = 0x48554C; // "HUL" — same icon as tray::ensure_icon
   auto copy = [](wchar_t* dst, size_t cap, const std::wstring& s) {
     const size_t len = s.size() < cap - 1 ? s.size() : cap - 1;
     wmemcpy(dst, s.c_str(), len);
     dst[len] = L'\0';
   };
-  auto add_icon = [&]() {
-    NOTIFYICONDATAW add = nid;
-    add.uFlags = NIF_ICON | NIF_TIP;
-    // Reuse the window's icon (set via WM_SETICON at startup) when available.
-    HICON icon = reinterpret_cast<HICON>(SendMessageW(owner, WM_GETICON, ICON_SMALL, 0));
-    add.hIcon = icon ? icon : LoadIconW(nullptr, IDI_APPLICATION);
-    copy(add.szTip, 128, shell::widen_utf8(app_name));
-    return Shell_NotifyIconW(NIM_ADD, &add) == TRUE;
-  };
-  if (!added) {
-    if (!add_icon()) return false;
-    added = true;
-  }
   nid.uFlags = NIF_INFO;
   nid.dwInfoFlags = NIIF_INFO;
   // An empty szInfo hides the balloon — promote the title to the body slot.
@@ -110,7 +107,8 @@ inline bool show(void* hwnd, const std::string& title, const std::string& body,
   if (Shell_NotifyIconW(NIM_MODIFY, &nid)) return true;
   // An Explorer restart drops tray icons and NIM_MODIFY fails forever after —
   // re-add the icon and retry once.
-  if (!add_icon()) { added = false; return false; }
+  tray::reset_icon_state();
+  if (!tray::ensure_icon(owner, app_name)) return false;
   return Shell_NotifyIconW(NIM_MODIFY, &nid) == TRUE;
 
 #elif defined(__APPLE__)
@@ -157,21 +155,45 @@ inline bool show(void* hwnd, const std::string& title, const std::string& body,
 #else // Linux
   (void)hwnd;
   GError* err = nullptr;
-  GDBusConnection* conn = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &err);
-  if (!conn) { if (err) g_error_free(err); return false; }
+  // One process-lifetime connection: it also carries the ActionInvoked signal
+  // subscription that turns a clicked notification into "notification:clicked".
+  static GDBusConnection* conn = nullptr;
+  static guint32 last_id = 0;
+  if (!conn) {
+    conn = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &err);
+    if (!conn) { if (err) g_error_free(err); return false; }
+    g_dbus_connection_signal_subscribe(
+        conn, "org.freedesktop.Notifications", "org.freedesktop.Notifications",
+        "ActionInvoked", "/org/freedesktop/Notifications", nullptr,
+        G_DBUS_SIGNAL_FLAGS_NONE,
+        +[](GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar*,
+            GVariant* params, gpointer user_data) {
+          guint32 id = 0;
+          const gchar* action = nullptr;
+          g_variant_get(params, "(u&s)", &id, &action);
+          const guint32 ours = *static_cast<guint32*>(user_data);
+          if (id == ours && action && std::string(action) == "default") {
+            hooks::emit("notification:clicked", nlohmann::json::object());
+          }
+        },
+        &last_id, nullptr);
+  }
+  // The "default" action is what makes the notification clickable at all.
+  GVariantBuilder actions;
+  g_variant_builder_init(&actions, G_VARIANT_TYPE("as"));
+  g_variant_builder_add(&actions, "s", "default");
+  g_variant_builder_add(&actions, "s", "Open");
   GVariant* ret = g_dbus_connection_call_sync(
       conn, "org.freedesktop.Notifications", "/org/freedesktop/Notifications",
       "org.freedesktop.Notifications", "Notify",
       g_variant_new("(susssasa{sv}i)",
                     app_name.c_str(), (guint32)0, icon_path.c_str(),
                     title.c_str(), body.c_str(),
-                    nullptr, nullptr, (gint32)-1),
+                    &actions, nullptr, (gint32)-1),
       G_VARIANT_TYPE("(u)"), G_DBUS_CALL_FLAGS_NONE, 3000, nullptr, &err);
-  // g_bus_get_sync returns a ref WE own; unref releases it without closing the
-  // shared session-bus connection.
-  if (!ret) { if (err) g_error_free(err); g_object_unref(conn); return false; }
+  if (!ret) { if (err) g_error_free(err); return false; }
+  g_variant_get(ret, "(u)", &last_id);
   g_variant_unref(ret);
-  g_object_unref(conn);
   return true;
 #endif
 }

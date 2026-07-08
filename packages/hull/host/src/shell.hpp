@@ -16,6 +16,8 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <shellapi.h>
+#include <shlobj.h>    // SHParseDisplayName / SHOpenFolderAndSelectItems (reveal)
+#include <objbase.h>   // CoTaskMemFree
 #elif defined(__APPLE__)
 #include <mach-o/dyld.h>     // _NSGetExecutablePath
 #include <objc/runtime.h>    // NSWorkspace via the objc runtime (same pattern as main.cpp)
@@ -58,6 +60,15 @@ inline std::string self_exe_path() {
 }
 
 #if defined(_WIN32)
+inline std::string narrow_utf16(const std::wstring& w) {
+  const int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, nullptr, 0, nullptr, nullptr);
+  if (n <= 0) return {};
+  std::string s(n, '\0');
+  WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, &s[0], n, nullptr, nullptr);
+  s.resize(n - 1); // drop the trailing NUL
+  return s;
+}
+
 inline std::wstring widen_utf8(const std::string& s) {
   const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
   if (n <= 0) return {};
@@ -154,6 +165,138 @@ inline bool open_external(const std::string& url) {
   return reinterpret_cast<SendIdB>(objc_msgSend)(ws, sel_registerName("openURL:"), nsurl);
 #else
   return g_app_info_launch_default_for_uri(url.c_str(), nullptr, nullptr) == TRUE;
+#endif
+}
+
+// Open a local file/folder with its OS default application.
+inline bool open_path(const std::string& path) {
+  if (path.empty()) return false;
+  if (dryrun()) {
+    std::cerr << "hull-host: [dry-run] open-path " << path << "\n";
+    return true;
+  }
+#if defined(_WIN32)
+  const std::wstring wpath = widen_utf8(path);
+  return reinterpret_cast<INT_PTR>(
+      ShellExecuteW(nullptr, L"open", wpath.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+#elif defined(__APPLE__)
+  using Send0   = id (*)(id, SEL);
+  using SendStr = id (*)(id, SEL, const char*);
+  using SendId  = id (*)(id, SEL, id);
+  using SendIdB = bool (*)(id, SEL, id);
+  id nsPath = reinterpret_cast<SendStr>(objc_msgSend)(
+      reinterpret_cast<id>(objc_getClass("NSString")),
+      sel_registerName("stringWithUTF8String:"), path.c_str());
+  id url = reinterpret_cast<SendId>(objc_msgSend)(
+      reinterpret_cast<id>(objc_getClass("NSURL")), sel_registerName("fileURLWithPath:"), nsPath);
+  if (!url) return false;
+  id ws = reinterpret_cast<Send0>(objc_msgSend)(
+      reinterpret_cast<id>(objc_getClass("NSWorkspace")), sel_registerName("sharedWorkspace"));
+  return reinterpret_cast<SendIdB>(objc_msgSend)(ws, sel_registerName("openURL:"), url);
+#else
+  gchar* uri = g_filename_to_uri(path.c_str(), nullptr, nullptr);
+  if (!uri) return false;
+  const bool ok = g_app_info_launch_default_for_uri(uri, nullptr, nullptr) == TRUE;
+  g_free(uri);
+  return ok;
+#endif
+}
+
+// Reveal a file in the OS file manager (Finder / Explorer / Files), selected.
+inline bool reveal_path(const std::string& path) {
+  if (path.empty()) return false;
+  if (dryrun()) {
+    std::cerr << "hull-host: [dry-run] reveal-path " << path << "\n";
+    return true;
+  }
+#if defined(_WIN32)
+  const std::wstring wpath = widen_utf8(path);
+  PIDLIST_ABSOLUTE pidl = nullptr;
+  if (FAILED(SHParseDisplayName(wpath.c_str(), nullptr, &pidl, 0, nullptr)) || !pidl) return false;
+  const bool ok = SUCCEEDED(SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0));
+  CoTaskMemFree(pidl);
+  return ok;
+#elif defined(__APPLE__)
+  using Send0   = id (*)(id, SEL);
+  using SendStr = id (*)(id, SEL, const char*);
+  using SendId  = id (*)(id, SEL, id);
+  using SendV   = void (*)(id, SEL, id);
+  id nsPath = reinterpret_cast<SendStr>(objc_msgSend)(
+      reinterpret_cast<id>(objc_getClass("NSString")),
+      sel_registerName("stringWithUTF8String:"), path.c_str());
+  id url = reinterpret_cast<SendId>(objc_msgSend)(
+      reinterpret_cast<id>(objc_getClass("NSURL")), sel_registerName("fileURLWithPath:"), nsPath);
+  if (!url) return false;
+  id arr = reinterpret_cast<SendId>(objc_msgSend)(
+      reinterpret_cast<id>(objc_getClass("NSArray")), sel_registerName("arrayWithObject:"), url);
+  id ws = reinterpret_cast<Send0>(objc_msgSend)(
+      reinterpret_cast<id>(objc_getClass("NSWorkspace")), sel_registerName("sharedWorkspace"));
+  reinterpret_cast<SendV>(objc_msgSend)(
+      ws, sel_registerName("activateFileViewerSelectingURLs:"), arr);
+  return true;
+#else
+  // Preferred: the FileManager1 D-Bus interface (selects the file). Fallback:
+  // open the containing directory.
+  gchar* uri = g_filename_to_uri(path.c_str(), nullptr, nullptr);
+  if (!uri) return false;
+  bool ok = false;
+  GDBusConnection* conn = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+  if (conn) {
+    GVariantBuilder items;
+    g_variant_builder_init(&items, G_VARIANT_TYPE("as"));
+    g_variant_builder_add(&items, "s", uri);
+    GVariant* ret = g_dbus_connection_call_sync(
+        conn, "org.freedesktop.FileManager1", "/org/freedesktop/FileManager1",
+        "org.freedesktop.FileManager1", "ShowItems",
+        g_variant_new("(ass)", &items, ""),
+        nullptr, G_DBUS_CALL_FLAGS_NONE, 3000, nullptr, nullptr);
+    if (ret) { g_variant_unref(ret); ok = true; }
+    g_object_unref(conn);
+  }
+  g_free(uri);
+  if (!ok) {
+    const std::string parent = std::string(path, 0, path.find_last_of('/'));
+    ok = open_path(parent.empty() ? "/" : parent);
+  }
+  return ok;
+#endif
+}
+
+// Move a file/folder to the OS trash / recycle bin (reversible by the user).
+inline bool trash_path(const std::string& path) {
+  if (path.empty()) return false;
+  if (dryrun()) {
+    std::cerr << "hull-host: [dry-run] trash-path " << path << "\n";
+    return true;
+  }
+#if defined(_WIN32)
+  std::wstring wpath = widen_utf8(path);
+  wpath.push_back(L'\0'); // SHFileOperation needs a double-NUL-terminated list
+  SHFILEOPSTRUCTW op{};
+  op.wFunc = FO_DELETE;
+  op.pFrom = wpath.c_str();
+  op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT;
+  return SHFileOperationW(&op) == 0 && !op.fAnyOperationsAborted;
+#elif defined(__APPLE__)
+  using Send0   = id (*)(id, SEL);
+  using SendStr = id (*)(id, SEL, const char*);
+  using SendId  = id (*)(id, SEL, id);
+  using Trash   = bool (*)(id, SEL, id, id, id);
+  id nsPath = reinterpret_cast<SendStr>(objc_msgSend)(
+      reinterpret_cast<id>(objc_getClass("NSString")),
+      sel_registerName("stringWithUTF8String:"), path.c_str());
+  id url = reinterpret_cast<SendId>(objc_msgSend)(
+      reinterpret_cast<id>(objc_getClass("NSURL")), sel_registerName("fileURLWithPath:"), nsPath);
+  if (!url) return false;
+  id fm = reinterpret_cast<Send0>(objc_msgSend)(
+      reinterpret_cast<id>(objc_getClass("NSFileManager")), sel_registerName("defaultManager"));
+  return reinterpret_cast<Trash>(objc_msgSend)(
+      fm, sel_registerName("trashItemAtURL:resultingItemURL:error:"), url, nullptr, nullptr);
+#else
+  GFile* f = g_file_new_for_path(path.c_str());
+  const bool ok = g_file_trash(f, nullptr, nullptr) == TRUE;
+  g_object_unref(f);
+  return ok;
 #endif
 }
 

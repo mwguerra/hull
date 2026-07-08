@@ -83,6 +83,17 @@ codebase calls crypto directly — files, settings, and the DB all go through it
 - Contents pass through the same `secure::` layer (plaintext by default, AES in the
   secure build). Files are `chmod 0600` on POSIX; writes are atomic.
 
+### Path-based IO (`files.readAt` / `writeAt`, dialogs, shell ops)
+
+The dialog + shell features (`dialogs.open/save`, `files.readAt`/`readTextAt`/
+`writeAt`, `openPath`/`revealPath`/`trashPath`) operate on **absolute paths** the
+user picked — raw bytes, **not** the managed store above and **not** through the
+`secure::` layer. This IO is entirely **app-code-driven**: nothing in the host
+initiates it, and there is no path-traversal concern because the app is
+explicitly handed arbitrary user-chosen paths. What keeps this away from remote
+content is the **origin guard** (above): a foreign page never sees these
+bindings, so it cannot open dialogs or read/write local paths.
+
 ## Storage location & permissions
 
 - Data is written to the **per-user app directory**, namespaced by `appId`:

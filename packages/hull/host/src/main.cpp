@@ -21,6 +21,8 @@
 #include <string>
 #include <optional>
 #include <thread>
+#include <atomic>
+#include <mutex>
 #include <filesystem>
 #include <nlohmann/json.hpp>
 
@@ -34,6 +36,12 @@
 #include "window_ctl.hpp"      // native fullscreen (HWND / NSWindow / GtkWindow)
 #include "link_script.hpp"     // injected link policy (external links -> OS browser)
 #include "notifications.hpp"   // system notifications (balloon / NSUserNotification / D-Bus)
+#include "window_state.hpp"    // opt-in size/position persistence (--remember-state)
+#include "dialogs.hpp"         // native file open/save + message dialogs
+#include "clipboard.hpp"       // system clipboard (plain text)
+#include "tray.hpp"            // status/tray icon + menu (Windows/macOS)
+#include "emit_hook.hpp"       // native callbacks -> dispatcher events
+#include "single_instance.hpp" // opt-in single-instance lock (--single-instance)
 #include "bindings/printer.hpp"
 #include "bindings/storage.hpp"
 #include "bindings/credentials.hpp"
@@ -284,6 +292,14 @@ struct Options {
   bool inspect = false;
   bool fullscreen = false;  // start the window in fullscreen
   bool no_bridge = false;   // plain web-view window: no bindings, no link policy
+  int min_width = 0;        // 0 = no constraint
+  int min_height = 0;
+  int max_width = 0;
+  int max_height = 0;
+  bool always_on_top = false;
+  bool center = false;
+  bool remember_state = false; // persist/restore bounds+maximized+fullscreen
+  bool single_instance = false; // second launch focuses the first instead
 };
 
 std::optional<std::string> next_arg(int argc, char** argv, int& i) {
@@ -308,6 +324,14 @@ Options parse_args(int argc, char** argv) {
     else if (a == "--inspect") { o.inspect = true; }
     else if (a == "--fullscreen") { o.fullscreen = true; }
     else if (a == "--no-bridge") { o.no_bridge = true; }
+    else if (a == "--min-width")  { if (auto v = next_arg(argc, argv, i)) o.min_width = std::stoi(*v); }
+    else if (a == "--min-height") { if (auto v = next_arg(argc, argv, i)) o.min_height = std::stoi(*v); }
+    else if (a == "--max-width")  { if (auto v = next_arg(argc, argv, i)) o.max_width = std::stoi(*v); }
+    else if (a == "--max-height") { if (auto v = next_arg(argc, argv, i)) o.max_height = std::stoi(*v); }
+    else if (a == "--always-on-top") { o.always_on_top = true; }
+    else if (a == "--center") { o.center = true; }
+    else if (a == "--remember-state") { o.remember_state = true; }
+    else if (a == "--single-instance") { o.single_instance = true; }
   }
   return o;
 }
@@ -424,6 +448,234 @@ void register_window_bindings(Dispatcher& d, WindowCtx* wc, const Options& opt) 
       reply(json{{"ok", true}, {"fullscreen", window_ctl::is_fullscreen(wc->handle())}});
     });
   });
+
+  // Simple window ops share one shape: require a window, run on the UI thread,
+  // reply { ok } (+ error when the platform can't do it — e.g. Wayland placement).
+  auto window_op = [wc, &d](const char* name, std::function<bool(void*, const json&)> fn) {
+    d.on(name, [wc, name, fn](const json& a, Reply reply) {
+      if (!wc->view) {
+        reply(json{{"ok", false},
+                   {"error", std::string(name) + ": no native window (browser dev mode)"}});
+        return;
+      }
+      wc->run_on_ui([wc, fn, a, reply] {
+        const bool ok = fn(wc->handle(), a);
+        reply(json{{"ok", ok},
+                   {"error", ok ? json(nullptr)
+                                : json("unsupported on this platform (or the call failed)")}});
+      });
+    });
+  };
+  window_op("windowMinimize", [](void* h, const json&) { return window_ctl::minimize(h); });
+  window_op("windowMaximize", [](void* h, const json& a) {
+    const bool on = a.empty() || !a.at(0).is_boolean() || a.at(0).get<bool>();
+    return window_ctl::set_maximized(h, on);
+  });
+  window_op("windowShow", [](void* h, const json&) { return window_ctl::set_visible(h, true); });
+  window_op("windowHide", [](void* h, const json&) { return window_ctl::set_visible(h, false); });
+  window_op("windowCenter", [](void* h, const json&) { return window_ctl::center(h); });
+  window_op("windowSetAlwaysOnTop", [](void* h, const json& a) {
+    const bool on = a.empty() || !a.at(0).is_boolean() || a.at(0).get<bool>();
+    return window_ctl::set_always_on_top(h, on);
+  });
+  window_op("windowSetPosition", [](void* h, const json& a) {
+    if (a.size() < 2 || !a.at(0).is_number() || !a.at(1).is_number()) return false;
+    return window_ctl::set_position(h, a.at(0).get<int>(), a.at(1).get<int>());
+  });
+
+  d.on("windowSetSize", [wc](const json& a, Reply reply) {
+    if (!wc->view) {
+      reply(json{{"ok", false}, {"error", "windowSetSize: no native window (browser dev mode)"}});
+      return;
+    }
+    if (a.size() < 2 || !a.at(0).is_number() || !a.at(1).is_number()) {
+      reply(json{{"ok", false}, {"error", "windowSetSize: expected (width, height)"}});
+      return;
+    }
+    const int w = a.at(0).get<int>(), h = a.at(1).get<int>();
+    wc->run_on_ui([wc, w, h, reply] {
+      wc->view->set_size(w, h, WEBVIEW_HINT_NONE);
+      reply(json{{"ok", true}});
+    });
+  });
+
+  d.on("windowIsMaximized", [wc](const json&, Reply reply) {
+    if (!wc->view) {
+      reply(json{{"ok", false}, {"error", "windowIsMaximized: no native window (browser dev mode)"}});
+      return;
+    }
+    wc->run_on_ui([wc, reply] {
+      reply(json{{"ok", true}, {"maximized", window_ctl::is_maximized(wc->handle())}});
+    });
+  });
+
+  d.on("windowGetBounds", [wc](const json&, Reply reply) {
+    if (!wc->view) {
+      reply(json{{"ok", false}, {"error", "windowGetBounds: no native window (browser dev mode)"}});
+      return;
+    }
+    wc->run_on_ui([wc, reply] {
+      void* h = wc->handle();
+      window_ctl::Bounds b;
+      if (!window_ctl::get_bounds(h, b)) {
+        reply(json{{"ok", false}, {"error", "windowGetBounds failed"}});
+        return;
+      }
+      json out{{"ok", true}, {"width", b.width}, {"height", b.height},
+               {"maximized", window_ctl::is_maximized(h)},
+               {"fullscreen", window_ctl::is_fullscreen(h)}};
+      if (b.has_position) { out["x"] = b.x; out["y"] = b.y; } // absent on Linux/Wayland
+      reply(out);
+    });
+  });
+}
+
+// Clipboard, native dialogs, and local-path shell ops (reveal / trash / open).
+void register_desktop_bindings(Dispatcher& d, WindowCtx* wc) {
+  d.on("clipboardReadText", [wc](const json&, Reply reply) {
+    wc->run_on_ui([wc, reply] {
+      const auto text = clipboard::read_text(wc->view ? wc->handle() : nullptr);
+      if (text) reply(json{{"ok", true}, {"text", *text}});
+      else reply(json{{"ok", true}, {"text", json(nullptr)}}); // empty/unavailable
+    });
+  });
+
+  d.on("clipboardWriteText", [wc](const json& a, Reply reply) {
+    const std::string text = (!a.empty() && a.at(0).is_string()) ? a.at(0).get<std::string>() : "";
+    wc->run_on_ui([wc, text, reply] {
+      const bool ok = clipboard::write_text(wc->view ? wc->handle() : nullptr, text);
+      reply(json{{"ok", ok},
+                 {"error", ok ? json(nullptr) : json("clipboard unavailable")}});
+    });
+  });
+
+  // dialogOpen({ title?, directory?, multiple?, filters?: [{name, extensions}] })
+  //   -> { ok, canceled, paths: string[] }
+  d.on("dialogOpen", [wc](const json& a, Reply reply) {
+    if (!wc->view) {
+      reply(json{{"ok", false}, {"error", "dialogOpen: no native window (browser dev mode)"}});
+      return;
+    }
+    dialogs::OpenOptions o;
+    const json opts = (!a.empty() && a.at(0).is_object()) ? a.at(0) : json::object();
+    o.title = opts.value("title", "");
+    o.directory = opts.value("directory", false);
+    o.multiple = opts.value("multiple", false);
+    for (const auto& f : opts.value("filters", json::array())) {
+      dialogs::Filter df;
+      df.name = f.value("name", "");
+      for (const auto& e : f.value("extensions", json::array())) {
+        if (e.is_string()) df.extensions.push_back(e.get<std::string>());
+      }
+      o.filters.push_back(df);
+    }
+    wc->run_on_ui([wc, o, reply] {
+      const auto picked = dialogs::open(wc->handle(), o);
+      reply(json{{"ok", true}, {"canceled", !picked.has_value()},
+                 {"paths", picked ? json(*picked) : json::array()}});
+    });
+  });
+
+  // dialogSave({ title?, defaultName?, filters? }) -> { ok, canceled, path }
+  d.on("dialogSave", [wc](const json& a, Reply reply) {
+    if (!wc->view) {
+      reply(json{{"ok", false}, {"error", "dialogSave: no native window (browser dev mode)"}});
+      return;
+    }
+    const json opts = (!a.empty() && a.at(0).is_object()) ? a.at(0) : json::object();
+    const std::string title = opts.value("title", "");
+    const std::string default_name = opts.value("defaultName", "");
+    std::vector<dialogs::Filter> filters;
+    for (const auto& f : opts.value("filters", json::array())) {
+      dialogs::Filter df;
+      df.name = f.value("name", "");
+      for (const auto& e : f.value("extensions", json::array())) {
+        if (e.is_string()) df.extensions.push_back(e.get<std::string>());
+      }
+      filters.push_back(df);
+    }
+    wc->run_on_ui([wc, title, default_name, filters, reply] {
+      const auto path = dialogs::save(wc->handle(), title, default_name, filters);
+      reply(json{{"ok", true}, {"canceled", !path.has_value()},
+                 {"path", path ? json(*path) : json(nullptr)}});
+    });
+  });
+
+  // dialogMessage({ title?, message, detail?, buttons?, type?, defaultId? })
+  //   -> { ok, button } (index into buttons; Windows maps to OK/Cancel/Yes/No sets)
+  d.on("dialogMessage", [wc](const json& a, Reply reply) {
+    if (!wc->view) {
+      reply(json{{"ok", false}, {"error", "dialogMessage: no native window (browser dev mode)"}});
+      return;
+    }
+    dialogs::MessageOptions o;
+    const json opts = (!a.empty() && a.at(0).is_object()) ? a.at(0) : json::object();
+    o.title = opts.value("title", "");
+    o.message = opts.value("message", "");
+    o.detail = opts.value("detail", "");
+    o.type = opts.value("type", "info");
+    o.default_id = opts.value("defaultId", 0);
+    for (const auto& b : opts.value("buttons", json::array())) {
+      if (b.is_string()) o.buttons.push_back(b.get<std::string>());
+    }
+    wc->run_on_ui([wc, o, reply] {
+      const int button = dialogs::message(wc->handle(), o);
+      reply(button >= 0 ? json{{"ok", true}, {"button", button}}
+                        : json{{"ok", false}, {"error", "dialog failed"}});
+    });
+  });
+
+  // traySet({ tooltip?, menu?: [{id,label,type,checked,enabled}] }) -> { ok }
+  // Events: "tray:menu" {id}; "tray:click" (Windows; macOS opens the menu).
+  d.on("traySet", [wc](const json& a, Reply reply) {
+    if (!wc->view) {
+      reply(json{{"ok", false}, {"error", "traySet: no native window (browser dev mode)"}});
+      return;
+    }
+    const json opts = (!a.empty() && a.at(0).is_object()) ? a.at(0) : json::object();
+    wc->run_on_ui([wc, opts, reply] {
+#if !defined(_WIN32) && !defined(__APPLE__)
+      reply(json{{"ok", false},
+                 {"error", "tray icons are not supported on Linux (no StatusNotifierItem host in Hull yet)"}});
+      (void)wc; (void)opts;
+#else
+      const std::string tooltip = opts.value("tooltip", "");
+      const std::string icon = opts.value("icon", "");
+      const auto items = tray::parse_menu(opts.value("menu", json::array()));
+      const bool ok = tray::set(wc->handle(), tooltip, icon, items);
+      reply(json{{"ok", ok}, {"error", ok ? json(nullptr) : json("failed to create the tray item")}});
+#endif
+    });
+  });
+
+  d.on("trayRemove", [wc](const json&, Reply reply) {
+    if (!wc->view) {
+      reply(json{{"ok", false}, {"error", "trayRemove: no native window (browser dev mode)"}});
+      return;
+    }
+    wc->run_on_ui([wc, reply] {
+      reply(json{{"ok", tray::remove(wc->handle())}});
+    });
+  });
+
+  // Local-path shell operations (no window required; safe worker-side).
+  auto path_op = [&d](const char* name, bool (*fn)(const std::string&)) {
+    d.on(name, [name, fn](const json& a, Reply reply) {
+      const std::string path = (!a.empty() && a.at(0).is_string()) ? a.at(0).get<std::string>() : "";
+      if (path.empty()) {
+        reply(json{{"ok", false}, {"error", std::string(name) + ": path required"}});
+        return;
+      }
+      std::thread([fn, name, path, reply] {
+        const bool ok = fn(path);
+        reply(json{{"ok", ok},
+                   {"error", ok ? json(nullptr) : json(std::string(name) + " failed")}});
+      }).detach();
+    });
+  };
+  path_op("openPath", &shell::open_path);
+  path_op("revealPath", &shell::reveal_path);
+  path_op("trashPath", &shell::trash_path);
 }
 
 void register_all(Dispatcher& d, const Options& opt, WindowCtx* wc) {
@@ -434,6 +686,7 @@ void register_all(Dispatcher& d, const Options& opt, WindowCtx* wc) {
     reply(json{{"ok", true}, {"appId", opt.appId}, {"secure", secure::active()}});
   });
   register_window_bindings(d, wc, opt);
+  register_desktop_bindings(d, wc);
   register_http_bindings(d);
   register_printer_bindings(d);
   register_storage_bindings(d);
@@ -458,6 +711,9 @@ int main(int argc, char** argv) {
   Dispatcher d;
   if (opt.inspect) d.set_trace(true);
   register_all(d, opt, &wc);
+  // Native callbacks (tray menu, notification clicks, second-instance pings)
+  // flow into the same event stream as every other C++ -> UI push.
+  hooks::emitter() = [&d](const std::string& e, const json& p) { d.emit(e, p); };
 
   // ---- Serve mode: headless HTTP/SSE bridge (browser dev mode) ----
   if (opt.serve_port) {
@@ -473,6 +729,15 @@ int main(int argc, char** argv) {
   }
 
   // ---- Window mode: render in the OS web view ----
+  // Single-instance (opt-in, app windows only — never openWindow children):
+  // second launches focus the running window and exit.
+  if (opt.single_instance && !opt.no_bridge) {
+    if (!single_instance::acquire()) {
+      std::cerr << "hull-host: another instance of " << opt.appId
+                << " is already running — focusing it.\n";
+      return 0;
+    }
+  }
   try {
 #if defined(__linux__)
     maybe_disable_webkit_sandbox();   // before any GTK/WebKit init (fork is safe here)
@@ -481,8 +746,26 @@ int main(int argc, char** argv) {
     webview::webview window(opt.debug, nullptr);
     window.set_title(opt.title);
     window.set_size(opt.width, opt.height, WEBVIEW_HINT_NONE);
+    if (opt.min_width > 0 || opt.min_height > 0) {
+      window.set_size(opt.min_width, opt.min_height, WEBVIEW_HINT_MIN);
+    }
+    if (opt.max_width > 0 || opt.max_height > 0) {
+      window.set_size(opt.max_width > 0 ? opt.max_width : 100000,
+                      opt.max_height > 0 ? opt.max_height : 100000, WEBVIEW_HINT_MAX);
+    }
+    // --remember-state: restore last session's bounds before the window shows.
+    window_state::State saved_state = opt.remember_state ? window_state::load()
+                                                         : window_state::State{};
+    if (saved_state.valid) {
+      window.set_size(saved_state.width, saved_state.height, WEBVIEW_HINT_NONE);
+    }
     if (opt.icon) set_window_icon(window, *opt.icon);
     wc.view = &window; // enables the fullscreen bindings + UI-thread dispatch
+    if (opt.single_instance && !opt.no_bridge) {
+      single_instance::present_handler() = [&wc] {
+        wc.view->dispatch([&wc] { window_ctl::present(wc.handle()); });
+      };
+    }
 
     // --no-bridge: a plain web-view window for remote content (openWindow spawns
     // these). No bindings, no emit sink, no link policy — the page is just a page.
@@ -565,13 +848,61 @@ int main(int argc, char** argv) {
       window.set_html(FALLBACK_HTML);
     }
 
-    // --fullscreen: queued so it runs once the UI loop is live (macOS animates
-    // the transition; GTK applies it at map time).
-    if (opt.fullscreen) {
-      window.dispatch([&wc] { window_ctl::set_fullscreen(wc.handle(), true); });
+    // Apply window options once the UI loop is live (macOS animates fullscreen;
+    // GTK applies it at map time). Order: position -> center -> pin -> maximize
+    // -> fullscreen, so the later states win.
+    if (opt.fullscreen || opt.center || opt.always_on_top || saved_state.valid) {
+      window.dispatch([&wc, &opt, saved_state] {
+        void* h = wc.handle();
+        if (saved_state.valid && saved_state.has_position) {
+          window_ctl::set_position(h, saved_state.x, saved_state.y);
+        }
+        if (opt.center) window_ctl::center(h);
+        if (opt.always_on_top) window_ctl::set_always_on_top(h, true);
+        if (saved_state.valid && saved_state.maximized) window_ctl::set_maximized(h, true);
+        if (opt.fullscreen || (saved_state.valid && saved_state.fullscreen)) {
+          window_ctl::set_fullscreen(h, true);
+        }
+      });
+    }
+
+    // --remember-state: sample bounds ~1/s on the UI thread; persisted on exit.
+    std::atomic<bool> sampling{opt.remember_state};
+    window_state::State live_state = saved_state;
+    std::mutex live_state_m;
+    std::thread sampler;
+    if (opt.remember_state) {
+      sampler = std::thread([&window, &wc, &sampling, &live_state, &live_state_m] {
+        while (sampling) {
+          for (int i = 0; i < 4 && sampling; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+          }
+          if (!sampling) break;
+          window.dispatch([&wc, &live_state, &live_state_m] {
+            std::lock_guard<std::mutex> lk(live_state_m);
+            window_state::capture(wc.handle(), live_state);
+          });
+        }
+      });
     }
 
     window.run();
+
+    // Shutdown: the window is about to destruct. Stop anything that could still
+    // dispatch into it — the single-instance listener (detached, process-lifetime)
+    // and any late C++ -> UI event from a detached worker (e.g. an in-flight
+    // httpDownload). Binding replies from a worker still racing here touch the
+    // window through the same pattern every async binding uses; that residual is
+    // documented in docs/project-analysis.md.
+    single_instance::active() = false;
+    wc.view = nullptr;
+
+    if (opt.remember_state) {
+      sampling = false;
+      if (sampler.joinable()) sampler.join();
+      std::lock_guard<std::mutex> lk(live_state_m);
+      window_state::save(live_state);
+    }
   } catch (const webview::exception& e) {
     std::cerr << e.what() << '\n';
     return 1;

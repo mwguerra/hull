@@ -13,13 +13,22 @@ you set are overridden — everything else keeps its default.
     "title": "Notes",               // default: package.json productName, else name
     "width": 1100,                  // default: 1100
     "height": 760,                  // default: 760
+    "minWidth": 800,                // native size constraints (default: none)
+    "minHeight": 500,
+    "maxWidth": 1600,
+    "maxHeight": 1000,
     "fullscreen": false,            // open in fullscreen (default: false)
+    "alwaysOnTop": false,           // keep the window above others (default: false)
+    "center": false,                // center the window on launch (default: false)
+    "rememberState": false,         // persist + restore bounds/maximized/fullscreen (default: false)
     "icon": "build/app-icon.png"    // window/app icon (default: bundled Hull logo)
   },
+  "singleInstance": false,          // second launch focuses the running window (default: false)
   "debug": false,                   // open dev tools (default: false)
   "outDir": "dist",                 // Vite build output (default: dist)
   "releaseDir": "release",          // packaged output (default: release)
-  "linux": { "sandbox": true }      // WebKitGTK sandbox (default: auto — see below)
+  "linux": { "sandbox": true },     // WebKitGTK sandbox (default: auto — see below)
+  "sign": { }                       // optional code-signing (default: off) — see distribution.md
 }
 ```
 
@@ -41,8 +50,14 @@ every key uses its default (title/appId derived from `package.json`).
 | `secure` | `false` | launch the crypto host build (`hull-host-secure`); see [security.md](security.md) |
 | `window.title` | pkg `productName`/`name` | native window title |
 | `window.width` / `window.height` | `1100` / `760` | window size |
+| `window.minWidth` / `minHeight` / `maxWidth` / `maxHeight` | none | native size constraints — the user can't resize past them |
 | `window.fullscreen` | `false` | open the window in fullscreen; see [The `window.fullscreen` key](#the-windowfullscreen-key) |
+| `window.alwaysOnTop` | `false` | keep the window above others (unsupported on Linux/Wayland — the compositor owns placement) |
+| `window.center` | `false` | center the window on launch (unsupported on Linux/Wayland) |
+| `window.rememberState` | `false` | persist + restore window bounds/maximized/fullscreen; see [The `window.rememberState` key](#the-windowrememberstate-key) |
 | `window.icon` (or `icon`) | bundled Hull logo | window/app icon; see [The `window.icon` key](#the-windowicon-key) |
+| `singleInstance` | `false` | only one running copy; a second launch focuses it; see [The `singleInstance` key](#the-singleinstance-key) |
+| `sign` | off | opt-in code-signing/notarization for `hull build`/`installer`; see [distribution.md](distribution.md#signing) |
 | `debug` | `false` | open the web-view dev tools |
 | `outDir` | `dist` | Vite UI build dir |
 | `releaseDir` | `release` | packaged app output dir |
@@ -100,6 +115,34 @@ const { fullscreen } = await isFullscreen();
 Platform notes: Windows uses borderless fullscreen on the window's monitor; macOS
 uses the native fullscreen Space (animated); Linux uses `gtk_window_fullscreen`.
 See [features.md](features.md#9--window-control--links).
+
+> All window/behavior keys (`fullscreen`, min/max sizes, `alwaysOnTop`, `center`,
+> `rememberState`, `singleInstance`) flow through **every** launch path — `hull
+> dev`/`start`, the generated launchers, the macOS `.app`, and Windows installer
+> shortcuts — via one shared flag list in the CLI, so a packaged app behaves
+> exactly like the dev window.
+
+## The `window.rememberState` key
+
+`"window": { "rememberState": true }` makes the window come back where the user
+left it: the host samples the window's bounds/maximized/fullscreen about once a
+second and writes them to `<app data dir>/window-state.json` when the app exits;
+the next launch restores them. Plain JSON in its own file — deliberately not
+entangled with the (possibly encrypted) settings store. Bounds are only captured
+while the window is in its normal state, so closing while maximized/fullscreen
+still restores sensible windowed bounds. On Linux/Wayland only the size is
+restored (the compositor owns positions).
+
+## The `singleInstance` key
+
+`"singleInstance": true` keeps one running copy per app: launching a second one
+focuses the existing window and exits, and the first instance receives a
+`bridge.on("app:second-instance", …)` event. Implementation: an exclusive OS
+lock plus a loopback port file in the app data dir; the lock is an OS handle, so
+it dies with the process (no stale-lock cleanup). On macOS, packaged `.app`s are
+already single-instanced by LaunchServices — this flag matters there for the raw
+binary / `hull dev`, and everywhere on Windows/Linux. See
+[features.md](features.md#15--single-instance).
 
 ## The `linux.sandbox` key
 

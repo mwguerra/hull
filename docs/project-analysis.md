@@ -189,14 +189,28 @@ a slowest-bindings summary. Dev-only by construction (loopback + DEV-gated).
    inspector trace server that runs alongside `hull dev`.
 9. **No file-size limits**: `files.read`/`write` round-trip whole files through
    base64 JSON in memory (`bindings/files.hpp:30`); a large upload can exhaust memory.
+   `httpDownload` streams to disk and is exempt, but `files.readAt`/`writeAt` are not.
+9b. **Async-binding replies during window teardown**: every async binding's reply
+   captures the web view by reference, so a detached worker still in flight when the
+   window closes (widest with a long `httpDownload`) can call `window.resolve` on a
+   destructing object. The single-instance listener and the C++→UI event sink are now
+   gated at shutdown (`single_instance::active()`, `wc.view = nullptr` right after
+   `run()`), but the generic reply path is unchanged — a proper fix is the worker
+   queue in item 7 (drain/cancel on shutdown). Low probability (needs a close mid-call);
+   documented rather than papered over.
 
 ### P3 — coverage/reach
 10. **Platform gaps**: no `darwin-x64` (Intel mac), `linux-arm64`, or `win32-arm64`
     packages (`host.js:6`); `docs/distribution.md` still advertises a `macos-13 (x64)`
     CI job that doesn't exist in `release.yml`.
-11. **HTTP binding is thin**: GET/POST only, JSON-only bodies, no custom headers, and
-    the keychain token key ignores the port (`bindings/http.hpp:22-27`).
-12. **Unsigned artifacts**: no code-signing/notarization anywhere (documented).
+11. **HTTP binding is thin** *(resolved — full `http.request/get/post/put/patch/delete`
+    client: custom headers, JSON/raw/multipart bodies, `timeoutMs`, `auth:false`,
+    `followRedirects`, plus streaming `http.download` with progress events;
+    `httpGet`/`httpPost` kept for compat)*: GET/POST only, JSON-only bodies, no custom
+    headers, and the keychain token key ignores the port (`bindings/http.hpp:22-27`).
+12. **Unsigned artifacts** *(resolved — opt-in `.hullrc` `sign` config: macOS
+    codesign + notarytool/stapler, Windows signtool; secrets via env vars; unsigned
+    remains the default)*: no code-signing/notarization anywhere (documented).
 13. **Windows non-ASCII corruption** in keychain + printer names (byte-by-byte
     `std::wstring` widening, `keychain.hpp:24`) — documented, but a real bug for
     non-English users.
@@ -224,7 +238,9 @@ other bindings — it exercises the real binary, real web view, and real bridge.
    off the UI thread (P2.6–7).
 6. `darwin-x64` package + fix the distribution.md CI-matrix description (P3.10).
 7. Window-state persistence (size/position/fullscreen across launches) — natural
-   follow-on to the window-control bindings.
+   follow-on to the window-control bindings. *(done — `.hullrc`
+   `window.rememberState` persists bounds/maximized/fullscreen to
+   `<app data dir>/window-state.json` via `window_state.hpp` and restores on launch.)*
 
 ---
 

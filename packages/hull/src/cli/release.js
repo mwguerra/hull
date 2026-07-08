@@ -2,6 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import archiver from "archiver";
+import { windowFlags } from "./config.js";
+import { signMacApp } from "./sign.js";
+
+// Extra host flags baked into every launcher (numbers/bare flags — shell-safe).
+const flagString = (cfg) => windowFlags(cfg).map((f) => ` ${f}`).join("");
 
 const xmlEscape = (s) =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -49,14 +54,14 @@ export function copyHostFiles(hostDir, destDir, binName) {
 // Write a double-clickable launcher appropriate to the TARGET os, invoking `binName`.
 export function writeLauncher(destDir, key, cfg, binName, iconName) {
   const os = key.split("-")[0];
-  const fullscreen = cfg.fullscreen ? " --fullscreen" : "";
+  const extra = flagString(cfg);
   if (os === "win32") {
     const name = `${sanitize(cfg.title)}.cmd`;
     const icon = iconName ? ` --icon "%~dp0${iconName}"` : "";
     const body =
       `@echo off\r\n` +
       `"%~dp0${binName}" --app "%~dp0app.html" --title "${cfg.title}" ` +
-      `--app-id "${cfg.appId}" --width ${cfg.width} --height ${cfg.height}${fullscreen}${icon}\r\n`;
+      `--app-id "${cfg.appId}" --width ${cfg.width} --height ${cfg.height}${extra}${icon}\r\n`;
     fs.writeFileSync(path.join(destDir, name), body);
     return { name, exec: false };
   }
@@ -75,7 +80,7 @@ export function writeLauncher(destDir, key, cfg, binName, iconName) {
     `DIR="$(cd "$(dirname "$0")" && pwd)"\n` +
     sandbox +
     `"$DIR/${binName}" --app "$DIR/app.html" --title "${cfg.title}" ` +
-    `--app-id "${cfg.appId}" --width ${cfg.width} --height ${cfg.height}${fullscreen}${icon}\n`;
+    `--app-id "${cfg.appId}" --width ${cfg.width} --height ${cfg.height}${extra}${icon}\n`;
   fs.writeFileSync(path.join(destDir, name), body, { mode: 0o755 });
   return { name, exec: true };
 }
@@ -121,7 +126,7 @@ export function writeMacApp(bundleDir, cfg, hostDir, binName, builtHtml, iconPat
     `RES="$DIR/../Resources"\n` +
     `exec "$DIR/${binName}" --app "$RES/app.html" --title "${cfg.title}" ` +
     `--app-id "${cfg.appId}" --width ${cfg.width} --height ${cfg.height}` +
-    `${cfg.fullscreen ? " --fullscreen" : ""} "$@"\n`;   // "$@": open ... --args <extra host flags>
+    `${flagString(cfg)} "$@"\n`;   // "$@": open ... --args <extra host flags>
   fs.writeFileSync(path.join(macosDir, execName), script, { mode: 0o755 });
   try { fs.chmodSync(path.join(macosDir, execName), 0o755); } catch { /* best effort */ }
 
@@ -140,6 +145,7 @@ export function writeMacApp(bundleDir, cfg, hostDir, binName, builtHtml, iconPat
     iconKey +
     `</dict>\n</plist>\n`;
   fs.writeFileSync(path.join(contents, "Info.plist"), plist);
+  signMacApp(cfg, path.join(bundleDir, appName)); // no-op unless .hullrc sign.mac is set
   return { appName };
 }
 

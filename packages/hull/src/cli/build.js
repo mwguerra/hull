@@ -109,6 +109,18 @@ export async function build(cwd, args, { verbose } = {}) {
     timer.step(`packaged ${h.key}`);
   }
 
+  // Update manifest: host this JSON (plus the archives) anywhere and point
+  // updates.check() at it — see docs/features.md#assisted-updates.
+  const manifest = {
+    version: label,
+    generatedAt: new Date().toISOString(),
+    platforms: Object.fromEntries(results.map((r) => [
+      r.key, { file: path.basename(r.archivePath), bytes: r.bytes },
+    ])),
+  };
+  fs.writeFileSync(path.join(versionRoot, "update-manifest.json"),
+                   JSON.stringify(manifest, null, 2));
+
   // Summary.
   const rel = (p) => path.relative(cwd, p).replace(/\\/g, "/");
   console.log(`\nhull build: ${label} -> ${rel(versionRoot)}/`);

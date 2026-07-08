@@ -14,7 +14,12 @@ different branch per OS behind `#if defined(_WIN32) / __APPLE__ / else`.
 | Keychain | Credential Manager | Keychain | Secret Service (libsecret) |
 | Printing | Winspool (RAW) | CUPS | CUPS |
 | Notifications | tray balloon → toast/Action Center | Notification Center (`.app`) / osascript (dev) | D-Bus `org.freedesktop.Notifications` |
+| Notification clicks | balloon click → `notification:clicked` | activation → `notification:clicked` | D-Bus default action → `notification:clicked` |
+| Tray / status item | `Shell_NotifyIcon` + popup menu | `NSStatusBar` + `NSMenu` | **not supported** (`{ ok: false }`) — see below |
 | Fullscreen | borderless (monitor bounds) | fullscreen Space (animated) | `gtk_window_fullscreen` |
+| Window placement (`center`, `setPosition`, `alwaysOnTop`) | native | native | **unsupported on Wayland** — the compositor owns placement |
+| Clipboard | Win32 clipboard (`CF_UNICODETEXT`) | `NSPasteboard` | `GdkClipboard` (async made sync) |
+| Dialogs | `IFileOpenDialog` / `MessageBoxW` (fixed button sets) | `NSOpenPanel` / `NSAlert` | `GtkFileDialog` / `GtkAlertDialog` (GTK 4.10+) |
 | Open external link | `ShellExecuteW` | `NSWorkspace openURL:` | gio `launch_default_for_uri` |
 | Port-9100 raw socket | Winsock (`ws2_32`) | POSIX sockets | POSIX sockets |
 | Storage dir | `%LOCALAPPDATA%\<appId>` | `~/Library/Application Support/<appId>` | `$XDG_DATA_HOME/<appId>` or `~/.local/share/<appId>` |
@@ -64,6 +69,25 @@ so each app gets its own storage namespace and keychain entries.
   the Web Notification API instead.
 - **Linux** requires a notification daemon on the session bus (present on GNOME,
   KDE, and every mainstream desktop).
+- **Clicks** work on all three: a Windows balloon click, a macOS notification
+  activation, and the Linux D-Bus default action all emit the
+  `notification:clicked` bridge event.
+
+## Tray caveats
+
+- **Linux has no tray support** — a modern Linux tray means implementing the
+  D-Bus StatusNotifierItem + dbusmenu specs (or depending on libappindicator),
+  neither of which fits Hull's zero-extra-deps host. `tray.set` replies
+  `{ ok: false }` with that explanation. Windows and macOS are fully supported.
+- **`tray:click`** (icon left-click) is Windows-only; on macOS clicking the icon
+  opens the menu.
+
+## Window control caveats
+
+- **Linux/Wayland**: the compositor owns window placement, so `appWindow.center()`,
+  `setAlwaysOnTop()` and `setPosition()` reply `{ ok: false }` and `getBounds()`
+  omits `x`/`y`. Sizing, minimize/maximize, show/hide, fullscreen, and the
+  size half of `window.rememberState` all work.
 
 ## Printing notes
 
@@ -133,6 +157,8 @@ See [configuration.md](configuration.md#the-linuxsandbox-key).
 
 Tested on **Windows x64, macOS (Apple Silicon), and Linux x64**: the host builds, the
 window opens, the JS bridge works, and `dev` / `build` / `start` / `installer` run on
-each. Remaining work is **code-signing/notarization** (installers ship unsigned) and
-bundling the macOS `.app`'s OpenSSL dylibs for distribution to *other* Macs. See
+each. **Code-signing/notarization is available as opt-in `.hullrc` `sign` config**
+(unsigned remains the default — see
+[distribution.md](distribution.md#signing)); remaining work is bundling the macOS
+`.app`'s OpenSSL dylibs for distribution to *other* Macs, and a Linux tray. See
 [distribution.md](distribution.md) for building hosts and installers per platform.

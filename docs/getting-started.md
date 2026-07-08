@@ -92,6 +92,10 @@ pure-UI work. (`isNative()` is narrower: native web view only.) See
 [features.md](features.md) for the full API and [devtools.md](devtools.md) for
 browser dev mode + the inspector.
 
+The package ships **TypeScript definitions** for `@mwguerra/hull/bridge`, `/vue`,
+and `/react`, so every import above is autocompleted and type-checked in your
+editor with zero configuration — in plain JS projects too.
+
 ## CLI commands
 
 | Command | What it does |

@@ -85,8 +85,8 @@ endif()
 
 # --- Platform: keychain + printing + sockets + (Gdiplus for the window icon) ---
 if (WIN32)
-  # Shell32: ShellExecuteW (openExternal — links in the OS default browser)
-  target_link_libraries(hull-host PRIVATE Advapi32 Winspool Crypt32 ws2_32 Gdiplus Gdi32 User32 Shell32)
+  # Shell32: ShellExecuteW/reveal/trash · Ole32: COM file dialogs · Comctl32: tray subclass
+  target_link_libraries(hull-host PRIVATE Advapi32 Winspool Crypt32 ws2_32 Gdiplus Gdi32 User32 Shell32 Ole32 Comctl32)
 elseif (APPLE)
   find_library(SECURITY_FRAMEWORK Security)
   find_library(CF_FRAMEWORK CoreFoundation)

@@ -6,8 +6,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { loadConfig, hostArgs } from "../src/cli/config.js";
+import { loadConfig, hostArgs, windowFlags } from "../src/cli/config.js";
 import { writeLauncher, writeMacApp } from "../src/cli/release.js";
+import { debLauncherBody } from "../src/cli/installer.js";
+import { compareVersions } from "../src/bridge/version.js";
 
 function tmpProject(files = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hull-test-"));
@@ -42,6 +44,54 @@ test("window.fullscreen coerces truthy/falsy values", async () => {
     const cfg = await loadConfig(cwd);
     assert.equal(cfg.fullscreen, expected, `fullscreen: ${JSON.stringify(value)}`);
   }
+});
+
+test("window options flow through windowFlags into hostArgs and launchers", async () => {
+  const cwd = tmpProject({
+    ".hullrc": {
+      singleInstance: true,
+      window: {
+        fullscreen: true, minWidth: 400, minHeight: 300, maxWidth: 1600,
+        alwaysOnTop: true, center: true, rememberState: true,
+      },
+    },
+  });
+  const cfg = await loadConfig(cwd);
+  const flags = windowFlags(cfg);
+  for (const expected of ["--fullscreen", "--min-width", "--min-height", "--max-width",
+                          "--always-on-top", "--center", "--remember-state",
+                          "--single-instance"]) {
+    assert.ok(flags.includes(expected), `windowFlags carries ${expected}`);
+  }
+  assert.ok(!flags.includes("--max-height"), "unset maxHeight emits no flag");
+  assert.equal(flags[flags.indexOf("--min-width") + 1], "400");
+  // hostArgs (dev/start) and the launcher writers must carry the same set
+  const args = hostArgs(cfg);
+  for (const f of flags) assert.ok(args.includes(f), `hostArgs carries ${f}`);
+  const dir = tmpProject();
+  const { name } = writeLauncher(dir, "linux-x64", cfg, "hull-host", null);
+  const body = fs.readFileSync(path.join(dir, name), "utf8");
+  for (const f of flags) assert.ok(body.includes(f), `launcher carries ${f}`);
+  // The .deb /usr/bin launcher is a distinct 5th path — it once dropped these.
+  const debBody = debLauncherBody("demo-app", "hull-host", cfg);
+  for (const f of flags) assert.ok(debBody.includes(f), `.deb launcher carries ${f}`);
+});
+
+test("compareVersions orders releases and prereleases (semver §11)", () => {
+  const gt = (a, b) => assert.equal(compareVersions(a, b), 1, `${a} > ${b}`);
+  const eq = (a, b) => assert.equal(compareVersions(a, b), 0, `${a} == ${b}`);
+  gt("1.2.0", "1.1.9");
+  gt("1.10.0", "1.9.0");        // numeric, not lexical
+  gt("v2.0.0", "v1.9.9");       // leading v tolerated
+  eq("1.0.0", "1.0.0");
+  eq("1.0", "1.0.0");           // missing patch == 0
+  // a prerelease is LOWER than its release (the bug the adversarial pass caught)
+  gt("1.0.0", "1.0.0-beta");
+  assert.equal(compareVersions("1.0.0-beta", "1.0.0"), -1);
+  gt("1.0.0-beta", "1.0.0-alpha");
+  gt("1.0.0-beta.2", "1.0.0-beta.1");
+  gt("1.0.0-rc.1", "1.0.0-beta"); // alphanumeric ordering, longer wins on shared prefix
+  assert.equal(compareVersions("1.0.0-alpha", "1.0.0-alpha.1"), -1); // shorter is lower
 });
 
 const baseCfg = {

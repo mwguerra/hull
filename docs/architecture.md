@@ -30,8 +30,17 @@ recompiled per project. The host is parameterized at launch:
 | `--icon <path>` | window/app icon (Windows runtime; macOS/Linux via bundle/.desktop) |
 | `--app-id <id>` | namespaces per-app storage + keychain |
 | `--fullscreen` | open the window in fullscreen (from `.hullrc` `window.fullscreen` or `hull dev|start --fullscreen`) |
+| `--min-width/-height`, `--max-width/-height` | native window size constraints (`.hullrc` `window.minWidth` …) |
+| `--always-on-top`, `--center` | window placement (`.hullrc` `window.alwaysOnTop` / `window.center`; no-ops on Wayland) |
+| `--remember-state` | persist + restore window bounds/maximized/fullscreen (`.hullrc` `window.rememberState`) |
+| `--single-instance` | one running copy; a second launch focuses the first (`.hullrc` `singleInstance`) |
 | `--no-bridge` | plain web-view window: no bindings, no link policy (how `openWindow` children are spawned) |
 | `--debug` | open dev tools |
+
+The window/behavior flags come from one shared list in the CLI (`windowFlags` in
+`config.js`), used by the dev/start spawns **and** baked into every generated
+launcher (Windows `.cmd`, unix launcher, macOS `.app`, installer shortcuts) — so
+a new flag can't miss a launch path.
 
 On Linux the host also reads two env vars for the WebKitGTK sandbox —
 `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS` and `HULL_FORCE_SANDBOX` — which the CLI
@@ -43,8 +52,9 @@ go" is possible. Per-platform binaries are delivered as os/cpu-gated optional
 dependencies (`@mwguerra/hull-win32-x64`, …) — npm installs only the one matching
 the machine. This is the same model esbuild and swc use.
 
-The standard bindings (HTTP, storage, keychain, printing, SQLite, files, window
-control + links, notifications) are compiled into the host and available to every app. The host
+The standard bindings (HTTP + downloads, storage, keychain, printing, SQLite, files
++ path IO, window control + links, dialogs, clipboard, tray, shell operations,
+notifications) are compiled into the host and available to every app. The host
 also injects a **link policy** into the app web view (external links open in the OS
 default browser, never inside the app — see
 [features.md](features.md#9--window-control--links)). For **app-specific** native code, `hull eject`

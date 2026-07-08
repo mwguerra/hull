@@ -38,7 +38,9 @@ All three examples ([vanilla-js](../examples/vanilla-js), [react](../examples/re
 | `db.query(sql, params?)` | `row[]` | SELECT |
 | `db.get(sql, params?)` | `row \| null` | SELECT first row |
 | `db.batch(statements)` | `results[]` | several `{ sql, params }` atomically (transaction) |
+| `db.transaction(build)` | `results[]` | batch sugar: queue statements with a builder, run as one transaction |
 | `db.migrate(steps)` | applied version | ordered, run-once schema setup |
+| `db.backup(path)` | the path | consistent online snapshot (`VACUUM INTO`) to an absolute path |
 
 The helpers unwrap the bridge envelope and **throw** on error, so use plain
 `try/catch`. The underlying bindings (`dbExec`/`dbQuery`/`dbGet`/`dbBatch`) are also
@@ -68,6 +70,36 @@ await db.migrate([
   "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",     // v2
   "CREATE INDEX idx_notes_pinned ON notes(pinned)",                     // v3
 ]);
+```
+
+### Transactions
+
+`db.transaction` is sugar over `db.batch`: queue statements with a builder, and
+they run as **one atomic transaction** (all or nothing):
+
+```js
+await db.transaction((tx) => {
+  tx.exec("UPDATE accounts SET balance = balance - ? WHERE id = ?", [50, from]);
+  tx.exec("UPDATE accounts SET balance = balance + ? WHERE id = ?", [50, to]);
+});
+```
+
+The builder is **synchronous** — `tx.exec()` queues a statement, it does not
+read, so there are no interactive reads inside the transaction. For
+read-modify-write logic, `db.query`/`db.get` first, then run the transaction.
+
+### Backup
+
+`db.backup(path)` takes a **consistent online snapshot** of the whole database
+(`VACUUM INTO`) — safe while the app is running, and the output is a compacted,
+standalone SQLite file. It fails if the destination already exists; the path
+must be absolute, which pairs naturally with a save dialog:
+
+```js
+import { db, dialogs } from "@mwguerra/hull/bridge";
+
+const { canceled, path } = await dialogs.save({ defaultName: "backup.db" });
+if (!canceled) await db.backup(path);
 ```
 
 ## Security & performance

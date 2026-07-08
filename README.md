@@ -15,7 +15,7 @@ Full docs live in **[`docs/`](docs/README.md)**.
 
 ## Examples
 
-Three runnable apps, each exercising **all** features (bridge, settings + events, credentials, HTTP, printing, SQLite, files):
+Three runnable apps, each exercising all **core** features (bridge, settings + events, credentials, HTTP, printing, SQLite, files):
 
 | Example | Stack | Path |
 |---------|-------|------|
@@ -77,12 +77,12 @@ bindings and compile your own host.
 - **All three platforms tested** — Windows x64, macOS (Apple Silicon), and Linux x64:
   host builds, the window opens, the JS bridge works, and `dev` / `build` / `start` /
   `installer` all run. Packaged Windows app ~8 MB unpacked (~3.5 MB zipped).
-- **Examples** — vanilla JS, React, Vue, each exercising all features (bridge, settings + events, credentials, HTTP, printing, SQLite, files, image upload, fullscreen + links); all build + launch.
-- **Releases** — versioned (`vX.Y.Z`/`development`), per-platform archives (zip/tar.gz) + native **installers** (`.dmg` / `.deb` / `.exe`).
-- **Capabilities** — HTTP/TLS, encrypted-at-rest (opt-in secure build: AES + SQLCipher), OS keychain, printing (documents + ESC/POS), **SQLite**, file storage, two-way state, **native fullscreen** (config/CLI/runtime), **smart links** (external links open in the OS default browser; opt-in in-app windows), **system notifications**.
+- **Examples** — vanilla JS, React, Vue, each exercising all core features (bridge, settings + events, credentials, HTTP, printing, SQLite, files, image upload, fullscreen + links); all build + launch.
+- **Releases** — versioned (`vX.Y.Z`/`development`), per-platform archives (zip/tar.gz) + native **installers** (`.dmg` / `.deb` / `.exe`), plus an `update-manifest.json` for **assisted updates** (check → download → hand the installer to the user; no silent self-patching).
+- **Capabilities** — full **HTTP client** (any verb, headers, multipart, timeouts) + **downloads with progress**, encrypted-at-rest (opt-in secure build: AES + SQLCipher), OS keychain, printing (documents + ESC/POS), **SQLite** (incl. `db.transaction`/`db.backup`), file storage + path IO, two-way state, **window control** (fullscreen, minimize/maximize, size/position, always-on-top) with optional **state persistence**, **clipboard**, **native dialogs + shell integration** (open/save/message, open/reveal/trash paths), **tray** (Windows/macOS), **system notifications** + click events, **dark/light theme detection**, **smart links**, optional **single-instance**, and **TypeScript definitions** for the whole bridge.
 - **Tests** — `npm test` (JS unit + C++ URL-policy) and `npm run test:e2e` (drives a real host window: link policy + fullscreen, observed over the inspector trace).
-- **DX** — `-v` timings on all commands; **browser dev mode** (`hull dev --browser`, full HMR, no recompile) + a dev-only **inspector** window (stripped from production).
-- **Not yet** — code-signing / notarization (installers are unsigned); macOS is unsigned + the `.app`'s OpenSSL dylibs aren't bundled for *other* Macs yet.
+- **DX** — `-v` timings on all commands; **browser dev mode** (`hull dev --browser`, full HMR, no recompile) + a dev-only **inspector** window (stripped from production); typed, autocompleted bridge API out of the box.
+- **Not yet** — tray on Linux (StatusNotifierItem not implemented); the macOS `.app`'s OpenSSL dylibs aren't bundled for *other* Macs yet. Code-signing / notarization is now available as **opt-in `.hullrc` `sign` config** (unsigned remains the default).
 
 ## Building the host binaries
 

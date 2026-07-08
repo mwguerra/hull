@@ -6,8 +6,11 @@
 
 Hull ships a small prebuilt native binary that renders your existing Vite app in the
 operating system's web view (WebView2 / WebKit / WebKitGTK) and exposes a JSON bridge
-to a C++ backend with batteries included: **TLS HTTP, encrypted storage, OS keychain,
-SQLite, files, and printing**. Your app stays plain JS/React/Vue.
+to a C++ backend with batteries included: **TLS HTTP + downloads, encrypted storage,
+OS keychain, SQLite, files, printing, window control, clipboard, native dialogs,
+tray, notifications, and assisted updates**. Your app stays plain JS/React/Vue —
+and the package ships **TypeScript definitions** for `./bridge`, `./vue`, and
+`./react`, so you get full autocomplete and type-safety with zero config.
 
 This README is the full reference for now.
 
@@ -60,9 +63,9 @@ Starting a **brand-new** project? Copy one of the recipes below.
 The C++ backend and the JSON bridge (`@mwguerra/hull/bridge`) are **identical across
 frameworks** — only the UI layer and the optional state hook differ. Each recipe below
 is the exact shape of a runnable example in the repo (`examples/vanilla-js`,
-`examples/react`, `examples/vue`); every example exercises **all** features (bridge,
-settings + C++→UI events, credentials, HTTP, printing, SQLite, files, single-image
-upload). Copy the one you want and trim.
+`examples/react`, `examples/vue`); every example exercises all **core** features
+(bridge, settings + C++→UI events, credentials, HTTP, printing, SQLite, files,
+single-image upload). Copy the one you want and trim.
 
 Every Hull project, regardless of framework, has:
 
@@ -458,7 +461,11 @@ All from `@mwguerra/hull/bridge`:
 | Function | Backend |
 |----------|---------|
 | `ping(text)` | sync echo (diagnostics) |
-| `httpPost(url, body)` / `httpGet(url)` | cpp-httplib + OpenSSL, on a worker thread; injects a `Bearer` token from the keychain |
+| `http.request({url, method, headers, body, form, timeoutMs, auth, followRedirects})` | full TLS client on a worker thread: any verb, custom headers, JSON/raw/multipart bodies; injects a `Bearer` token from the keychain (`auth: false` skips it) |
+| `http.get/post/put/patch/delete(url, …)` | verb shorthands for `http.request` |
+| `http.download({url, path})` | stream a URL to disk; progress via `bridge.on("http:download", …)` |
+| `httpPost(url, body)` / `httpGet(url)` | the original simple wrappers — kept for compat |
+| `updates.check(manifestUrl, currentVersion)` / `updates.download(url, path)` / `updates.openInstaller(path)` | assisted updates against the `update-manifest.json` that `hull build` emits — check → download → hand the installer to the user (no silent self-patching) |
 | `saveSetting` / `loadSetting` / `loadAllSettings` | per-user store (plaintext by default; AES in the secure build) |
 | `nativeSetting(key)` | two-way setting store: `.get()` / `.set(v)` / `.subscribe(fn)` / `.load()` |
 | `saveCredential` / `credentialExists` / `eraseCredential` | OS keychain; **write-only** — secrets never return to JS |
@@ -466,14 +473,27 @@ All from `@mwguerra/hull/bridge`:
 | `printMessage(printer, text)` | print a **text document** — works with any printer (Print to PDF, OneNote, laser) |
 | `printReceipt(printer, text)` / `printNetwork(host, port, text)` | raw **ESC/POS** for thermal receipt printers (spooler / TCP port-9100) |
 | `db.query` / `db.get` / `db.exec` / `db.batch` / `db.migrate` | embedded SQLite, parameterized, per-user storage |
+| `db.transaction(tx => { tx.exec(sql, params) })` | queue statements synchronously, run as **one atomic transaction** |
+| `db.backup(path)` | consistent online snapshot (`VACUUM INTO`) to an absolute path; fails if it exists |
 | `files.write` / `read` / `readText` / `list` / `remove` | file/upload storage in the per-user dir (through the secure layer) |
+| `files.readAt(path)` / `readTextAt(path)` / `writeAt(path, content)` | raw-byte IO at absolute paths picked via `dialogs.*` (not the managed store) |
+| `appWindow.minimize/maximize/isMaximized/show/hide/center/setAlwaysOnTop/setSize/setPosition/getBounds` + fullscreen | native window control; `center`/`setAlwaysOnTop`/`setPosition` unsupported on Linux/Wayland (reply `{ ok: false }`) |
 | `setFullscreen(on)` / `isFullscreen()` / `toggleFullscreen()` | native window fullscreen; DOM Fullscreen fallback in a browser |
+| `clipboard.readText()` / `clipboard.writeText(text)` | native pasteboard; `navigator.clipboard` fallback in a browser |
+| `dialogs.open({title, directory, multiple, filters})` / `dialogs.save({title, defaultName, filters})` / `dialogs.message({message, buttons, type, …})` | native modal file pickers + message boxes (Windows message boxes use the fixed `MessageBoxW` button sets) |
+| `openPath(path)` / `revealPath(path)` / `trashPath(path)` | OS shell ops: default app, show in file manager, move to trash |
+| `tray.set({tooltip, icon, menu})` / `tray.remove()` | status item + menu on Windows/macOS; events `tray:menu` (`{ id }`) and `tray:click` (Windows). **Not supported on Linux** — replies `{ ok: false }` |
+| `getTheme()` / `onThemeChanged(cb)` | `"dark"`/`"light"` via `prefers-color-scheme` (web views follow the OS) |
 | `openExternal(url)` | open `http/https/mailto/tel` with the **OS default browser/handler** — the default for every external link |
 | `openWindow(url, {title,width,height})` | opt-in: open web content in a **new Hull window** (plain web view, no bridge) |
-| `notify(title, body)` | system notification (toast / Notification Center / D-Bus); Web Notification API in a browser |
+| `notify(title, body)` | system notification (toast / Notification Center / D-Bus); clicks emit `notification:clicked`; Web Notification API in a browser |
 | `appInfo()` | `{ ok, appId, secure }` — `secure` true on a crypto build |
-| `bridge.on(event, fn)` | subscribe to C++ → UI push events (e.g. `settings:changed`); returns an unsubscribe fn |
+| `bridge.on(event, fn)` | subscribe to C++ → UI push events (e.g. `settings:changed`, `notification:clicked`, `app:second-instance`); returns an unsubscribe fn |
 | `hasBridge()` / `isNative()` / `bridgeMode()` | `hasBridge` = reachable (native or browser dev); `isNative` = native web view; `bridgeMode` = `"native"`/`"http"`/`"none"` |
+
+Everything above is fully typed — the package ships `.d.ts` files for
+`@mwguerra/hull/bridge`, `/vue`, and `/react`, so editors autocomplete the whole
+API with no setup.
 
 Framework hooks: `useNativeState(key)` from `@mwguerra/hull/vue` (returns a ref) and
 `@mwguerra/hull/react` (returns `[value, setValue]`).
@@ -524,12 +544,21 @@ package defaults. Lookup order: `.hullrc` → `.hullrc.json` → `hull.config.js
 | `appId` | `com.hull.<pkg name>` | namespaces the store, DB, files, and keychain entries so multiple Hull apps never collide |
 | `window.title` | pkg `productName`/`name` | native window title |
 | `window.width` / `window.height` | `1100` / `760` | window size |
+| `window.minWidth` / `minHeight` / `maxWidth` / `maxHeight` | none | native size constraints — the user can't resize past them |
 | `window.fullscreen` | `false` | open in fullscreen (dev, start, and packaged apps); per-run: `hull dev/start --fullscreen` |
+| `window.alwaysOnTop` | `false` | keep the window above others (unsupported on Linux/Wayland) |
+| `window.center` | `false` | center the window on launch (unsupported on Linux/Wayland) |
+| `window.rememberState` | `false` | persist bounds/maximized/fullscreen to `<app data dir>/window-state.json` and restore on launch |
 | `window.icon` (or top-level `icon`) | bundled Hull logo | PNG/ICO for the window/app icon; set at runtime on Windows (GDI+), via the app bundle on macOS/Linux; SVG is not a valid native icon |
+| `singleInstance` | `false` | a second launch focuses the running window and exits; the first instance gets `bridge.on("app:second-instance", …)` |
 | `secure` | `false` | run the crypto host build (`hull-host-secure`): AES files/settings + SQLCipher DB |
+| `sign` | off | opt-in code-signing: `mac.identity` (+ `mac.notarize`) and `windows.certFile`/`passwordEnv`/`timestampUrl`; secrets come from env vars, never the file |
 | `debug` | `false` | open the web-view dev tools |
 | `outDir` | `dist` | Vite UI build dir |
 | `releaseDir` | `release` | packaged-app output dir |
+
+All window/behavior keys apply on **every** launch path — `hull dev`/`start`, the
+generated launchers, the macOS `.app`, and Windows installer shortcuts.
 
 ## Develop in the browser (no recompile)
 
@@ -556,6 +585,8 @@ the libraries it needs, your inlined `app.html`, a double-click launcher, and `i
 if you configured one. Unpack on the target and run. `--platform all` also packages
 other platforms whose host binary is installed (realistically produced via CI, one
 runner per OS). With `secure: true`, bundle dirs and archives get a `-secure` suffix.
+Each build also writes `release/<version>/update-manifest.json` (version + per-platform
+file/bytes) — host it anywhere and point `updates.check()` at it for assisted updates.
 
 ### Native installers
 
@@ -573,8 +604,9 @@ npm run build && npx hull installer       # -> release/<version>/<App>-<version>
 
 Each is built on its own OS (the tools are OS-native), like the host. Install with:
 double-click the `.dmg` and drag to Applications; `sudo apt install ./<app>.deb`; run the
-`.exe`. Unsigned for now — for distribution to other machines, add code-signing
-(macOS notarization / Windows Authenticode) as a later step.
+`.exe`. Unsigned by default — for distribution to other machines, turn on the opt-in
+`.hullrc` `sign` config (macOS codesign + notarization, Windows Authenticode via
+signtool; secrets from env vars). All signing steps are no-ops when unset.
 
 ## Security (at-rest crypto is a build option)
 

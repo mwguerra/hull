@@ -2,10 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { loadConfig } from "./config.js";
+import { loadConfig, windowFlags } from "./config.js";
 import { currentTarget, binaryName } from "./host.js";
 import { parseVersion, sanitize } from "./release.js";
 import { createTimer } from "./timing.js";
+import { signMacFile, notarizeMac, signWindows } from "./sign.js";
 
 // hull installer [vX.Y.Z]
 // Wrap the already-built bundle for the CURRENT platform into a native installer:
@@ -58,6 +59,9 @@ function macDmg(bundleDir, outDir, base, cfg) {
   execFileSync("hdiutil", ["create", "-volname", cfg.title, "-srcfolder", stage,
                            "-ov", "-format", "UDZO", dmg], { stdio: "inherit" });
   fs.rmSync(stage, { recursive: true, force: true });
+  // Optional signing/notarization (no-ops unless .hullrc `sign.mac` is set).
+  signMacFile(cfg, dmg);
+  notarizeMac(cfg, dmg);
   return dmg;
 }
 
@@ -122,6 +126,17 @@ ${cfg.license ? `  <project_license>${xmlEsc(cfg.license)}</project_license>\n` 
   fs.writeFileSync(path.join(dir, `${cfg.appId}.metainfo.xml`), xml);
 }
 
+// The /usr/bin launcher body for a .deb. Exported so a unit test can assert it
+// carries the same windowFlags as every other launch path (this path once
+// silently dropped them).
+export function debLauncherBody(pkg, binName, cfg) {
+  const flags = windowFlags(cfg).map((f) => ` ${f}`).join("");
+  return `#!/bin/sh\n` +
+    `exec /opt/${pkg}/${binName} --app /opt/${pkg}/app.html --title "${cfg.title}" ` +
+    `--app-id "${cfg.appId}" --width ${cfg.width} --height ${cfg.height}${flags} ` +
+    `--icon /opt/${pkg}/icon.png "$@"\n`;
+}
+
 function linuxDeb(bundleDir, outDir, base, cfg, key, ver, binName) {
   const pkg = debName(cfg);
   const stage = path.join(outDir, ".deb-stage");
@@ -138,11 +153,7 @@ function linuxDeb(bundleDir, outDir, base, cfg, key, ver, binName) {
   // Launcher -> /usr/bin/<pkg>
   const usrbin = path.join(stage, "usr", "bin");
   fs.mkdirSync(usrbin, { recursive: true });
-  fs.writeFileSync(path.join(usrbin, pkg),
-    `#!/bin/sh\n` +
-    `exec /opt/${pkg}/${binName} --app /opt/${pkg}/app.html --title "${cfg.title}" ` +
-    `--app-id "${cfg.appId}" --width ${cfg.width} --height ${cfg.height} ` +
-    `--icon /opt/${pkg}/icon.png "$@"\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(usrbin, pkg), debLauncherBody(pkg, binName, cfg), { mode: 0o755 });
 
   // Desktop entry + icon -> the compositor matches the window (app-id) to this .desktop
   const apps = path.join(stage, "usr", "share", "applications");
@@ -227,9 +238,11 @@ function winInno(bundleDir, outDir, base, cfg, ver, binName) {
   const t = issStr(cfg.title);                       // for unquoted directives
   const tq = t.replace(/"/g, '""');                  // for quoted contexts
   const appIdq = issStr(cfg.appId).replace(/"/g, '""');
+  const extraFlags = windowFlags(cfg).join(" ");
   const params =
     `--app ""{app}\\app.html"" --title ""${tq}"" --app-id ""${appIdq}"" ` +
-    `--width ${cfg.width} --height ${cfg.height} --icon ""{app}\\icon.png""`;
+    `--width ${cfg.width} --height ${cfg.height}` +
+    `${extraFlags ? " " + extraFlags : ""} --icon ""{app}\\icon.png""`;
 
   const iss =
 `[Setup]
@@ -261,5 +274,7 @@ Filename: "{app}\\${binName}"; Parameters: "${params}"; Description: "Launch ${t
   fs.writeFileSync(issPath, iss);
   execFileSync(iscc, [issPath], { stdio: "inherit" });
   fs.rmSync(issPath, { force: true });
-  return path.join(outDir, `${base}.exe`);
+  const exe = path.join(outDir, `${base}.exe`);
+  signWindows(cfg, exe); // no-op unless .hullrc `sign.windows` is set
+  return exe;
 }

@@ -40,6 +40,18 @@ inline void register_database_bindings(Dispatcher& d) {
     }).detach();
   });
 
+  // dbBackup(path) -> { ok }  — consistent online snapshot via VACUUM INTO
+  // (fails if the destination already exists, so a backup is never clobbered).
+  d.on("dbBackup", [](const json& a, Reply reply) {
+    std::thread([a, reply]() {
+      try {
+        const std::string path = a.at(0).get<std::string>();
+        if (path.empty()) { reply(json{{"ok", false}, {"error", "dbBackup: path required"}}); return; }
+        reply(hulldb::exec("VACUUM INTO ?", json::array({path})));
+      } catch (const std::exception& e) { reply(json{{"ok", false}, {"error", e.what()}}); }
+    }).detach();
+  });
+
   // dbBatch([{sql, params?}, ...]) -> { ok, results }  (atomic transaction)
   d.on("dbBatch", [](const json& a, Reply reply) {
     std::thread([a, reply]() {

@@ -11,14 +11,24 @@
     "test:e2e": "node test/e2e/run.mjs"
   },
   "exports": {
-    "./bridge": "./src/bridge/index.js",
-    "./vue": "./src/vue/index.js",
-    "./react": "./src/react/index.js",
+    "./bridge": {
+      "types": "./types/bridge.d.ts",
+      "default": "./src/bridge/index.js"
+    },
+    "./vue": {
+      "types": "./types/vue.d.ts",
+      "default": "./src/vue/index.js"
+    },
+    "./react": {
+      "types": "./types/react.d.ts",
+      "default": "./src/react/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
     "bin",
     "src",
+    "types",
     "assets",
     "devtools/dist",
     "README.md",
